@@ -21,12 +21,15 @@
        </div>
 
        <!-- Ações Rápidas -->
-       <div class="flex gap-2 w-full md:w-auto">
-         <button @click="openModal('block')" class="flex-1 md:flex-none bg-gray-800 hover:bg-black text-white font-bold py-2.5 px-4 rounded-xl shadow-md flex items-center justify-center gap-2 transition-all active:scale-95 text-xs">
+       <div class="flex gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0 custom-scrollbar">
+         <button @click="openModal('block')" class="shrink-0 bg-gray-800 hover:bg-black text-white font-bold py-2.5 px-4 rounded-xl shadow-md flex items-center justify-center gap-2 transition-all active:scale-95 text-xs">
            <i data-lucide="lock" class="w-4 h-4"></i> <span class="hidden md:inline">Bloqueios</span>
          </button>
-         <button @click="openModal('create')" class="flex-1 md:flex-none bg-accent hover:bg-pink-600 text-white font-bold py-2.5 px-6 rounded-xl shadow-md flex items-center justify-center gap-2 transition-all active:scale-95 text-xs">
-           <i data-lucide="plus" class="w-4 h-4"></i> <span class="hidden md:inline">Novo Agendamento</span><span class="md:hidden">Novo</span>
+         <button @click="openModal('create_fixed')" class="shrink-0 bg-purple-600 hover:bg-purple-700 text-white font-bold py-2.5 px-4 rounded-xl shadow-md flex items-center justify-center gap-2 transition-all active:scale-95 text-xs">
+           <i data-lucide="star" class="w-4 h-4"></i> Novo Fixo
+         </button>
+         <button @click="openModal('create')" class="shrink-0 bg-accent hover:bg-pink-600 text-white font-bold py-2.5 px-4 rounded-xl shadow-md flex items-center justify-center gap-2 transition-all active:scale-95 text-xs">
+           <i data-lucide="plus" class="w-4 h-4"></i> Novo Comum
          </button>
        </div>
     </div>
@@ -56,13 +59,16 @@
                        </div>
                        <div>
                           <div class="text-xs text-secondary font-bold">{{ item.horario_inicio }}</div>
-                          <!-- USO DA NOVA COLUNA horario_fim -->
                           <div class="text-[10px] text-gray-400">{{ item.horario_fim || '...' }}</div>
                        </div>
                     </div>
                  </td>
                  <td class="p-4">
-                    <div class="font-bold text-primary">{{ item.nome_cliente }}</div>
+                    <div class="font-bold text-primary flex items-center gap-1">
+                      <span v-if="item.obs_admin && item.obs_admin.includes('[FIXO]')" class="text-purple-600" title="Cliente Fixo">★</span>
+                      {{ item.nome_cliente }}
+                      <span v-if="getQtd(item.obs_admin) > 1" class="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded ml-1 font-bold">{{ getQtd(item.obs_admin) }} Crianças</span>
+                    </div>
                     <div class="text-xs text-gray-500">{{ item.servico_nome }}</div>
                  </td>
                  <td class="p-4"><span :class="badgeClass(item.status)" class="px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider">{{ item.status }}</span></td>
@@ -102,15 +108,18 @@
               <!-- Dots (Mobile) -->
               <div class="md:hidden flex flex-wrap justify-center gap-1 content-end mt-auto pb-1 z-10">
                  <div v-for="evt in day.events" :key="evt.uuid" class="w-1.5 h-1.5 rounded-full" 
-                      :class="{'bg-orange-400': evt.status==='Pendente', 'bg-primary': evt.status==='Confirmado', 'bg-gray-600': evt.status==='Bloqueado'}"></div>
+                      :class="{'bg-purple-500': evt.obs_admin && evt.obs_admin.includes('[FIXO]'), 'bg-orange-400': evt.status==='Pendente' && !evt.obs_admin?.includes('[FIXO]'), 'bg-primary': evt.status==='Confirmado' && !evt.obs_admin?.includes('[FIXO]'), 'bg-gray-600': evt.status==='Bloqueado'}"></div>
               </div>
 
               <!-- Lista (Desktop) -->
               <div class="hidden md:flex flex-col gap-1 mt-1 z-10 overflow-hidden">
                  <div v-for="evt in day.events.slice(0, 3)" :key="evt.uuid" 
-                      :class="['text-[10px] px-1.5 py-0.5 rounded truncate font-medium border-l-2', 
-                               evt.status==='Bloqueado' ? 'bg-gray-200 border-gray-500 text-gray-600' : 'bg-primary/5 border-primary text-primary']">
-                   {{ evt.horario_inicio }} {{ evt.status === 'Bloqueado' ? 'BLOQUEADO' : evt.nome_cliente.split(' ')[0] }}
+                      :class="['text-[10px] px-1.5 py-0.5 rounded truncate font-medium border-l-2 flex items-center gap-1', 
+                               evt.status==='Bloqueado' ? 'bg-gray-200 border-gray-500 text-gray-600' : 
+                               (evt.obs_admin && evt.obs_admin.includes('[FIXO]') ? 'bg-purple-50 border-purple-500 text-purple-700' : 'bg-primary/5 border-primary text-primary')]">
+                   <span v-if="evt.obs_admin && evt.obs_admin.includes('[FIXO]')" class="text-purple-600">★</span>
+                   <span class="truncate">{{ evt.horario_inicio }} {{ evt.status === 'Bloqueado' ? 'BLOQUEADO' : evt.nome_cliente.split(' ')[0] }}</span>
+                   <span v-if="getQtd(evt.obs_admin) > 1" class="font-bold">({{getQtd(evt.obs_admin)}})</span>
                  </div>
                  <div v-if="day.totalCount > 3" class="text-[9px] text-center text-secondary font-bold hover:underline">+{{ day.totalCount - 3 }} mais</div>
               </div>
@@ -153,16 +162,20 @@
 
                         <div class="text-center min-w-[3.5rem] flex flex-col justify-center border-r border-gray-100 pr-4">
                            <div class="font-bold text-lg leading-none text-primary">{{ evt.horario_inicio }}</div>
-                           <!-- USO DA NOVA COLUNA horario_fim -->
                            <div class="text-[10px] text-gray-400 mt-1">{{ evt.horario_fim }}</div>
                         </div>
                         <div class="flex-1">
                            <div class="flex justify-between items-start">
-                              <h4 :class="['font-bold text-sm', evt.status==='Bloqueado'?'text-gray-600 italic':'text-primary']">{{ evt.nome_cliente }}</h4>
+                              <h4 :class="['font-bold text-sm flex items-center gap-1.5', evt.status==='Bloqueado'?'text-gray-600 italic':'text-primary']">
+                                <span v-if="evt.obs_admin && evt.obs_admin.includes('[FIXO]')" class="bg-purple-100 text-purple-700 text-[9px] px-1.5 py-0.5 rounded-md uppercase tracking-wider font-extrabold">Fixo</span>
+                                {{ evt.nome_cliente }}
+                              </h4>
                               <span v-if="evt.status!=='Bloqueado'" :class="badgeClass(evt.status)" class="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase">{{ evt.status }}</span>
                            </div>
-                           <p class="text-xs text-secondary mt-0.5 line-clamp-1">{{ evt.servico_nome }}</p>
-                           <!-- USO DA NOVA COLUNA valor_cobrado -->
+                           <p class="text-xs text-secondary mt-0.5 line-clamp-1">
+                             {{ evt.servico_nome }} 
+                             <span v-if="getQtd(evt.obs_admin) > 1" class="font-bold text-blue-600 ml-1">({{getQtd(evt.obs_admin)}} Crianças)</span>
+                           </p>
                            <p v-if="evt.valor_cobrado > 0" class="text-xs font-bold text-gray-400 mt-2">{{ formatMoney(evt.valor_cobrado) }}</p>
                         </div>
                         <button @click.stop="deleteItem(evt)" class="self-center p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors z-10" :title="evt.status==='Bloqueado'?'Liberar':'Excluir'">
@@ -175,10 +188,13 @@
               <!-- Footer Sidebar -->
               <div class="p-4 bg-gray-50 border-t border-gray-100 flex gap-2">
                   <button @click="openModal('block')" class="flex-1 py-3 bg-gray-800 hover:bg-gray-900 text-white rounded-xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-all text-sm shadow-lg">
-                     <i data-lucide="lock" class="w-4 h-4"></i> Bloqueios
+                     <i data-lucide="lock" class="w-4 h-4"></i>
                   </button>
-                  <button @click="openModal('create')" class="flex-[2] py-3 bg-primary hover:bg-blue-900 text-white rounded-xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-all text-sm shadow-lg shadow-blue-900/20">
-                     <i data-lucide="plus" class="w-4 h-4"></i> Novo Agendamento
+                  <button @click="openModal('create_fixed')" class="flex-[1.5] py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-all text-xs shadow-lg shadow-purple-900/20">
+                     <i data-lucide="star" class="w-4 h-4"></i> Fixo
+                  </button>
+                  <button @click="openModal('create')" class="flex-[1.5] py-3 bg-primary hover:bg-blue-900 text-white rounded-xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-all text-xs shadow-lg shadow-blue-900/20">
+                     <i data-lucide="plus" class="w-4 h-4"></i> Comum
                   </button>
               </div>
           </div>
@@ -191,10 +207,14 @@
         <div class="bg-surface w-full max-w-md rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-fade-in-up" @click.stop>
            
            <!-- Header Modal -->
-           <div :class="['p-5 flex justify-between items-center text-white', modalMode === 'block' ? 'bg-gray-800' : 'bg-primary']">
+           <div :class="['p-5 flex justify-between items-center text-white', modalMode === 'block' ? 'bg-gray-800' : (modalMode === 'create_fixed' ? 'bg-purple-600' : 'bg-primary')]">
             <h3 class="font-bold text-lg flex items-center gap-2">
-              <div class="p-1.5 bg-white/20 rounded-lg"><i :data-lucide="modalMode==='block'?'lock':'calendar'" class="w-5 h-5"></i></div>
-              {{ modalMode==='block' ? 'Gerenciar Bloqueios' : (modalMode === 'create' ? 'Novo Agendamento' : 'Editar') }}
+              <div class="p-1.5 bg-white/20 rounded-lg">
+                <i v-if="modalMode==='block'" data-lucide="lock" class="w-5 h-5"></i>
+                <i v-else-if="modalMode==='create_fixed'" data-lucide="star" class="w-5 h-5"></i>
+                <i v-else data-lucide="calendar" class="w-5 h-5"></i>
+              </div>
+              {{ modalMode==='block' ? 'Gerenciar Bloqueios' : (modalMode === 'create_fixed' ? 'Novo Cliente Fixo' : (modalMode === 'create' ? 'Novo Agendamento' : 'Editar')) }}
             </h3>
             <button @click="closeModal" class="hover:bg-white/20 p-1.5 rounded-full transition-colors"><i data-lucide="x" class="w-5 h-5"></i></button>
            </div>
@@ -202,25 +222,21 @@
            <!-- Body Scroll -->
            <div class="p-6 space-y-5 overflow-y-auto">
              
-             <!-- MODO BLOQUEIO (COM LISTAGEM) -->
+             <!-- MODO BLOQUEIO -->
              <div v-if="modalMode === 'block'" class="space-y-6">
-                
-                <!-- Lista de Bloqueios Existentes -->
+                <!-- ... Lista Bloqueios ... -->
                 <div>
                   <h4 class="text-sm font-bold text-primary flex items-center gap-2 mb-3">
                       <i data-lucide="list" class="w-4 h-4 text-secondary"></i> Bloqueios Ativos
                   </h4>
-                  
                   <div v-if="blockedList.length === 0" class="text-center p-4 bg-gray-50 rounded-xl border border-dashed border-gray-200 text-xs text-gray-400">
                       Nenhum bloqueio encontrado.
                   </div>
-
                   <div v-else class="max-h-40 overflow-y-auto custom-scrollbar space-y-2 pr-1 border border-gray-100 rounded-xl p-1 bg-gray-50/50">
                       <div v-for="block in blockedList" :key="block.uuid" class="bg-white border border-gray-200 p-3 rounded-lg flex justify-between items-center shadow-sm">
                         <div>
                             <div class="text-xs font-bold text-gray-800">
                               {{ formatDate(block.data_agendada) }} 
-                              <!-- USO DA NOVA COLUNA horario_fim -->
                               <span v-if="block.horario_inicio !== '00:00'" class="font-normal text-gray-500">({{ block.horario_inicio }} - {{ block.horario_fim }})</span>
                               <span v-else class="text-[10px] bg-gray-800 text-white px-1.5 py-0.5 rounded ml-1">Dia Todo</span>
                             </div>
@@ -230,19 +246,15 @@
                       </div>
                   </div>
                 </div>
-                
                 <div class="h-px bg-gray-200"></div>
-
-                <!-- Formulário de Novo Bloqueio -->
+                <!-- ... Form Novo Bloqueio ... -->
                 <div class="space-y-4">
                   <h4 class="text-sm font-bold text-primary flex items-center gap-2">
                       <i data-lucide="plus-circle" class="w-4 h-4 text-secondary"></i> Novo Bloqueio
                   </h4>
-
                   <div class="bg-yellow-50 border-l-4 border-yellow-400 p-3 rounded-r-lg">
-                    <p class="text-xs text-yellow-800 leading-relaxed">Defina o intervalo. O bloqueio será aplicado a <strong>todos os dias</strong> selecionados.</p>
+                    <p class="text-xs text-yellow-800 leading-relaxed">O bloqueio será aplicado a <strong>todos os dias</strong> no intervalo selecionado.</p>
                   </div>
-
                   <div class="grid grid-cols-2 gap-3">
                     <div>
                       <label class="block text-xs font-bold text-secondary mb-1">Início</label>
@@ -253,14 +265,12 @@
                       <input v-model="blockForm.data_fim" type="date" class="w-full bg-white border border-gray-200 rounded-xl p-3 text-sm font-medium focus:ring-2 focus:ring-gray-800 focus:border-transparent outline-none transition-all">
                     </div>
                   </div>
-
                   <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100 cursor-pointer" @click="blockForm.dia_inteiro = !blockForm.dia_inteiro">
                     <div :class="['w-5 h-5 rounded border flex items-center justify-center transition-colors', blockForm.dia_inteiro ? 'bg-gray-800 border-gray-800' : 'bg-white border-gray-300']">
                         <i v-if="blockForm.dia_inteiro" data-lucide="check" class="w-3 h-3 text-white"></i>
                     </div>
                     <span class="text-sm font-bold text-gray-700">Dia Inteiro (00:00 - 23:59)</span>
                   </div>
-
                   <transition name="slide">
                     <div v-if="!blockForm.dia_inteiro" class="grid grid-cols-2 gap-3">
                       <div>
@@ -273,7 +283,6 @@
                       </div>
                     </div>
                   </transition>
-                  
                   <div>
                     <label class="block text-xs font-bold text-secondary mb-1">Motivo (Opcional)</label>
                     <input v-model="blockForm.obs" class="w-full bg-white border border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-gray-800 outline-none" placeholder="Ex: Férias, Médico...">
@@ -281,7 +290,96 @@
                 </div>
              </div>
 
-             <!-- MODO AGENDAMENTO (PADRÃO) -->
+             <!-- MODO CLIENTE FIXO -->
+             <div v-else-if="modalMode === 'create_fixed'" class="space-y-4">
+               <div class="grid grid-cols-2 gap-3">
+                 <div>
+                   <label class="block text-xs font-bold text-purple-800 mb-1">Cliente Fixo</label>
+                   <input v-model="fixedForm.nome_cliente" class="w-full bg-white border border-purple-100 rounded-xl p-3 text-sm focus:ring-2 focus:ring-purple-400 outline-none" placeholder="Nome">
+                 </div>
+                 <div>
+                   <label class="block text-xs font-bold text-purple-800 mb-1">Celular</label>
+                   <input v-model="fixedForm.celular" class="w-full bg-white border border-purple-100 rounded-xl p-3 text-sm focus:ring-2 focus:ring-purple-400 outline-none" placeholder="(99) ...">
+                 </div>
+               </div>
+               
+               <div class="grid grid-cols-2 gap-3">
+                 <div>
+                   <label class="block text-xs font-bold text-purple-800 mb-1">Serviço</label>
+                   <select v-model="fixedForm.servico_id" class="w-full bg-white border border-purple-100 rounded-xl p-3 text-sm focus:ring-2 focus:ring-purple-400 outline-none">
+                     <option value="" disabled>Selecione...</option>
+                     <option v-for="svc in servicesList" :key="svc.id" :value="svc.id">{{ svc.nome }}</option>
+                   </select>
+                 </div>
+                 <div>
+                   <label class="block text-xs font-bold text-purple-800 mb-1">Qtd de Crianças</label>
+                   <select v-model="fixedForm.qtd_criancas" class="w-full bg-white border border-purple-100 rounded-xl p-3 text-sm focus:ring-2 focus:ring-purple-400 outline-none font-bold">
+                     <option :value="1">1 Criança</option>
+                     <option :value="2">2 Crianças</option>
+                     <option :value="3">3 Crianças</option>
+                     <option :value="4">4 Crianças (MÁX)</option>
+                   </select>
+                 </div>
+               </div>
+
+               <!-- DIAS DA SEMANA -->
+               <div>
+                  <label class="block text-xs font-bold text-purple-800 mb-2">Dias da Semana</label>
+                  <div class="flex flex-wrap gap-2">
+                    <button v-for="d in daysOfWeek" :key="d.val" @click="toggleFixedDay(d.val)" 
+                            type="button"
+                            :class="['w-10 h-10 rounded-xl font-bold text-xs flex items-center justify-center transition-all', 
+                                     fixedForm.dias_semana.includes(d.val) ? 'bg-purple-600 text-white shadow-md' : 'bg-white border border-purple-100 text-purple-600 hover:bg-purple-50']">
+                       {{ d.label }}
+                    </button>
+                  </div>
+               </div>
+
+               <!-- PERÍODO DO CONTRATO -->
+               <div class="bg-purple-50 p-4 rounded-xl border border-purple-100">
+                  <div class="flex items-center gap-3 cursor-pointer mb-4" @click="fixedForm.indeterminado = !fixedForm.indeterminado">
+                    <div :class="['w-5 h-5 rounded border flex items-center justify-center transition-colors', fixedForm.indeterminado ? 'bg-purple-600 border-purple-600' : 'bg-white border-purple-300']">
+                        <i v-if="fixedForm.indeterminado" data-lucide="check" class="w-3 h-3 text-white"></i>
+                    </div>
+                    <div>
+                      <span class="text-sm font-bold text-purple-900 block leading-tight">Contrato Indeterminado</span>
+                      <span class="text-[10px] text-purple-700">Gera agenda para os próximos 6 meses (Renovável)</span>
+                    </div>
+                  </div>
+                  
+                  <div class="grid grid-cols-2 gap-3">
+                    <div>
+                      <label class="block text-xs font-bold text-purple-800 mb-1">Início do Contrato</label>
+                      <input v-model="fixedForm.data_inicio" type="date" class="w-full bg-white border border-purple-200 rounded-xl p-2.5 text-sm focus:ring-2 focus:ring-purple-400 outline-none">
+                    </div>
+                    <div v-if="!fixedForm.indeterminado">
+                      <label class="block text-xs font-bold text-purple-800 mb-1">Término do Contrato</label>
+                      <input v-model="fixedForm.data_fim" type="date" class="w-full bg-white border border-purple-200 rounded-xl p-2.5 text-sm focus:ring-2 focus:ring-purple-400 outline-none">
+                    </div>
+                  </div>
+               </div>
+
+               <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-xs font-bold text-purple-800 mb-1">Horário de Início</label>
+                    <input v-model="fixedForm.horario_inicio" type="time" class="w-full bg-white border border-purple-100 rounded-xl p-3 text-sm font-bold text-primary">
+                  </div>
+                  <div>
+                    <label class="block text-xs font-bold text-purple-800 mb-1">Valor p/ Dia</label>
+                    <div class="relative">
+                      <span class="absolute left-3 top-3 text-gray-400 text-xs">R$</span>
+                      <input v-model.number="fixedForm.valor" type="number" step="0.01" class="w-full bg-white border border-purple-100 rounded-xl p-3 pl-8 text-sm">
+                    </div>
+                  </div>
+               </div>
+               
+               <div>
+                 <label class="block text-xs font-bold text-purple-800 mb-1">Observações Privadas</label>
+                 <textarea v-model="fixedForm.obs" rows="2" class="w-full bg-white border border-purple-100 rounded-xl p-3 text-sm focus:ring-2 focus:ring-purple-400 outline-none" placeholder="Detalhes do contrato, alergias..."></textarea>
+               </div>
+             </div>
+
+             <!-- MODO AGENDAMENTO COMUM (CRIAÇÃO/EDIÇÃO) -->
              <div v-else class="space-y-4">
                <div class="grid grid-cols-2 gap-3">
                  <div>
@@ -294,12 +392,23 @@
                  </div>
                </div>
                
-               <div>
-                 <label class="block text-xs font-bold text-secondary mb-1">Serviço</label>
-                 <select v-model="form.servico_id" class="w-full bg-white border border-pink-100 rounded-xl p-3 text-sm focus:ring-2 focus:ring-accent outline-none">
-                   <option value="" disabled>Selecione...</option>
-                   <option v-for="svc in servicesList" :key="svc.id" :value="svc.id">{{ svc.nome }} - {{ formatMoney(svc.preco) }}</option>
-                 </select>
+               <div class="grid grid-cols-2 gap-3">
+                 <div>
+                   <label class="block text-xs font-bold text-secondary mb-1">Serviço</label>
+                   <select v-model="form.servico_id" class="w-full bg-white border border-pink-100 rounded-xl p-3 text-sm focus:ring-2 focus:ring-accent outline-none">
+                     <option value="" disabled>Selecione...</option>
+                     <option v-for="svc in servicesList" :key="svc.id" :value="svc.id">{{ svc.nome }}</option>
+                   </select>
+                 </div>
+                 <div>
+                   <label class="block text-xs font-bold text-secondary mb-1">Qtd de Crianças</label>
+                   <select v-model="form.qtd_criancas" class="w-full bg-white border border-pink-100 rounded-xl p-3 text-sm focus:ring-2 focus:ring-accent outline-none font-bold text-primary">
+                     <option :value="1">1 Criança</option>
+                     <option :value="2">2 Crianças</option>
+                     <option :value="3">3 Crianças</option>
+                     <option :value="4">4 Crianças (MÁX)</option>
+                   </select>
+                 </div>
                </div>
 
                <div class="grid grid-cols-2 gap-3">
@@ -347,6 +456,10 @@
                 <i data-lucide="lock" class="w-4 h-4"></i> Adicionar Bloqueio
               </button>
               
+              <button v-else-if="modalMode==='create_fixed'" @click="saveFixedAppointment" class="px-6 py-2.5 bg-purple-600 text-white font-bold rounded-xl shadow-lg shadow-purple-900/20 hover:bg-purple-700 transition-transform active:scale-95 flex items-center gap-2">
+                <i data-lucide="star" class="w-4 h-4"></i> Gerar Fixo
+              </button>
+
               <button v-else @click="saveAppointment" class="px-6 py-2.5 bg-primary text-white font-bold rounded-xl shadow-lg shadow-blue-900/20 hover:bg-blue-900 transition-transform active:scale-95 flex items-center gap-2">
                 <i data-lucide="check" class="w-4 h-4"></i> Salvar
               </button>
