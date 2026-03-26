@@ -1,0 +1,159 @@
+<template id="view-financeiro">
+  <div class="space-y-6 animate-fade-in relative pb-20">
+    
+    <!-- HEADER & CONTROLES -->
+    <div class="flex flex-col md:flex-row justify-between items-center bg-surface p-4 rounded-2xl shadow-sm border border-pink-50 gap-4">
+       <!-- Filtro de Mês -->
+       <div class="flex items-center bg-bgApp rounded-xl p-1">
+          <button @click="changeMonth(-1)" class="p-2 hover:bg-white rounded-lg text-primary transition-colors"><i data-lucide="chevron-left" class="w-5 h-5"></i></button>
+          <span class="w-32 text-center font-bold text-primary text-sm capitalize">{{ currentMonthLabel }}</span>
+          <button @click="changeMonth(1)" class="p-2 hover:bg-white rounded-lg text-primary transition-colors"><i data-lucide="chevron-right" class="w-5 h-5"></i></button>
+       </div>
+
+       <!-- Botões de Ação -->
+       <div class="flex gap-2 w-full md:w-auto">
+         <button @click="openModal('Saida')" class="flex-1 md:flex-none bg-white border border-red-100 text-red-500 hover:bg-red-50 font-bold py-2.5 px-4 rounded-xl shadow-sm flex items-center justify-center gap-2 transition-transform active:scale-95 text-sm">
+           <i data-lucide="arrow-down-circle" class="w-4 h-4"></i> Despesa
+         </button>
+         <button @click="openModal('Entrada')" class="flex-1 md:flex-none bg-primary hover:bg-blue-900 text-white font-bold py-2.5 px-6 rounded-xl shadow-md flex items-center justify-center gap-2 transition-transform active:scale-95 text-sm">
+           <i data-lucide="arrow-up-circle" class="w-4 h-4"></i> Receita
+         </button>
+       </div>
+    </div>
+
+    <!-- CARDS DE RESUMO -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+       <!-- Saldo -->
+       <div class="bg-surface p-5 rounded-2xl shadow-sm border border-pink-50 relative overflow-hidden group">
+          <div class="absolute right-0 top-0 w-24 h-24 bg-gradient-to-br from-primary/5 to-transparent rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110"></div>
+          <p class="text-xs font-bold text-secondary uppercase tracking-wider mb-1">Saldo em Caixa</p>
+          <h3 :class="['text-2xl font-bold', totalSaldo >= 0 ? 'text-primary' : 'text-red-500']">{{ formatMoney(totalSaldo) }}</h3>
+          <p class="text-[10px] text-gray-400 mt-1">Acumulado geral</p>
+       </div>
+       
+       <!-- Entradas -->
+       <div class="bg-surface p-5 rounded-2xl shadow-sm border border-pink-50 relative overflow-hidden group">
+          <div class="absolute right-0 top-0 w-24 h-24 bg-green-50 rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110"></div>
+          <p class="text-xs font-bold text-green-600 uppercase tracking-wider mb-1">Receitas (Mês)</p>
+          <h3 class="text-2xl font-bold text-green-700">+{{ formatMoney(monthlyStats.entradas) }}</h3>
+          <div class="w-full bg-gray-100 h-1 mt-2 rounded-full overflow-hidden"><div class="bg-green-500 h-full" style="width: 70%"></div></div>
+       </div>
+
+       <!-- Saídas -->
+       <div class="bg-surface p-5 rounded-2xl shadow-sm border border-pink-50 relative overflow-hidden group">
+          <div class="absolute right-0 top-0 w-24 h-24 bg-red-50 rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110"></div>
+          <p class="text-xs font-bold text-red-600 uppercase tracking-wider mb-1">Despesas (Mês)</p>
+          <h3 class="text-2xl font-bold text-red-700">-{{ formatMoney(monthlyStats.saidas) }}</h3>
+          <div class="w-full bg-gray-100 h-1 mt-2 rounded-full overflow-hidden"><div class="bg-red-500 h-full" style="width: 30%"></div></div>
+       </div>
+    </div>
+
+    <!-- LISTA DE MOVIMENTAÇÕES -->
+    <div class="bg-surface rounded-2xl shadow-sm border border-white flex flex-col overflow-hidden animate-fade-in-up">
+       <div v-if="loading" class="p-12 text-center text-secondary">
+         <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-accent mx-auto mb-2"></div>Carregando...
+       </div>
+       
+       <div v-else-if="filteredList.length === 0" class="p-12 text-center text-gray-400">
+         <i data-lucide="wallet" class="w-12 h-12 mx-auto mb-3 opacity-20"></i>
+         Nenhuma movimentação neste mês.
+       </div>
+
+       <div v-else class="overflow-x-auto scrolling-touch">
+         <table class="w-full text-left text-sm whitespace-nowrap">
+           <thead class="bg-bgApp/50 text-primary border-b border-pink-100">
+             <tr>
+               <th class="p-4 font-semibold">Data</th>
+               <th class="p-4 font-semibold">Descrição</th>
+               <th class="p-4 font-semibold">Categoria</th>
+               <th class="p-4 font-semibold text-right">Valor</th>
+               <th class="p-4 font-semibold text-center w-10"></th>
+             </tr>
+           </thead>
+           <tbody class="divide-y divide-pink-50">
+             <tr v-for="item in filteredList" :key="item.uuid" class="hover:bg-bgApp/30 transition-colors group">
+               <td class="p-4 text-gray-500 text-xs">{{ formatDate(item.data_pagamento) }}</td>
+               <td class="p-4 font-medium text-primary">{{ item.descricao }}</td>
+               <td class="p-4">
+                 <span class="px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide bg-gray-100 text-gray-500 border border-gray-200">
+                   {{ item.categoria }}
+                 </span>
+               </td>
+               <td :class="['p-4 text-right font-bold', item.tipo === 'Entrada' ? 'text-green-600' : 'text-red-500']">
+                 {{ item.tipo === 'Entrada' ? '+' : '-' }} {{ formatMoney(item.valor) }}
+               </td>
+               <td class="p-4 text-center">
+                 <button @click="deleteItem(item.uuid)" class="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100">
+                   <i data-lucide="trash-2" class="w-4 h-4"></i>
+                 </button>
+               </td>
+             </tr>
+           </tbody>
+         </table>
+       </div>
+    </div>
+
+    <!-- MODAL NOVA MOVIMENTAÇÃO -->
+    <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 backdrop-blur-sm p-4" @click.self="closeModal">
+      <div class="bg-surface w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-fade-in flex flex-col" @click.stop>
+         <div :class="['p-4 flex justify-between items-center text-white', form.tipo === 'Entrada' ? 'bg-green-600' : 'bg-red-500']">
+            <h3 class="font-bold text-lg flex items-center gap-2">
+              <i :data-lucide="form.tipo === 'Entrada' ? 'arrow-up-circle' : 'arrow-down-circle'" class="w-5 h-5"></i>
+              Nova {{ form.tipo }}
+            </h3>
+            <button @click="closeModal" class="hover:bg-white/20 p-1 rounded-full"><i data-lucide="x" class="w-5 h-5"></i></button>
+         </div>
+         
+         <div class="p-6 space-y-4">
+           <!-- Valor -->
+           <div>
+             <label class="block text-xs font-bold text-secondary mb-1">Valor (R$)</label>
+             <div class="relative">
+               <span class="absolute left-3 top-2.5 text-gray-400 font-bold">R$</span>
+               <input v-model.number="form.valor" type="number" step="0.01" class="w-full bg-bgApp/30 border border-pink-100 rounded-lg p-2.5 pl-10 text-xl font-bold text-primary focus:outline-none focus:border-accent" placeholder="0,00" autofocus>
+             </div>
+           </div>
+
+           <!-- Descrição -->
+           <div>
+             <label class="block text-xs font-bold text-secondary mb-1">Descrição</label>
+             <input v-model="form.descricao" class="w-full bg-bgApp/30 border border-pink-100 rounded-lg p-2.5 text-primary focus:outline-none focus:border-accent" placeholder="Ex: Pagamento Cliente X">
+           </div>
+
+           <!-- Categoria & Data -->
+           <div class="grid grid-cols-2 gap-3">
+             <div>
+               <label class="block text-xs font-bold text-secondary mb-1">Categoria</label>
+               <select v-model="form.categoria" class="w-full bg-bgApp/30 border border-pink-100 rounded-lg p-2.5 text-primary text-xs focus:outline-none focus:border-accent">
+                 <optgroup label="Receitas" v-if="form.tipo === 'Entrada'">
+                   <option>Serviços</option>
+                   <option>Produtos</option>
+                   <option>Outros</option>
+                 </optgroup>
+                 <optgroup label="Despesas" v-if="form.tipo === 'Saida'">
+                   <option>Transporte</option>
+                   <option>Alimentação</option>
+                   <option>Materiais</option>
+                   <option>Marketing</option>
+                   <option>Outros</option>
+                 </optgroup>
+               </select>
+             </div>
+             <div>
+               <label class="block text-xs font-bold text-secondary mb-1">Data</label>
+               <input v-model="form.data_pagamento" type="date" class="w-full bg-bgApp/30 border border-pink-100 rounded-lg p-2.5 text-primary text-xs focus:outline-none focus:border-accent">
+             </div>
+           </div>
+         </div>
+
+         <div class="p-4 bg-gray-50 flex justify-end gap-3 border-t border-gray-100">
+            <button @click="closeModal" class="px-4 py-2 text-gray-500 font-medium text-sm rounded-lg hover:bg-gray-100 transition-colors">Cancelar</button>
+            <button @click="saveMovimentacao" :class="['px-6 py-2 text-white font-bold rounded-lg shadow-md active:scale-95 transform transition-colors', form.tipo === 'Entrada' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-500 hover:bg-red-600']">
+              Confirmar
+            </button>
+         </div>
+      </div>
+    </div>
+
+  </div>
+</template>
