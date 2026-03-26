@@ -1,0 +1,359 @@
+<template id="view-agenda">
+  <div class="space-y-6 relative pb-10">
+    
+    <!-- HEADER DA AGENDA -->
+    <div class="flex flex-col md:flex-row justify-between items-center bg-surface p-3 rounded-2xl shadow-sm border border-pink-50 gap-4">
+       <!-- Toggle View -->
+       <div class="flex bg-bgApp rounded-xl p-1 w-full md:w-auto">
+         <button @click="viewMode = 'list'" :class="['flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2', viewMode === 'list' ? 'bg-white text-primary shadow-sm' : 'text-primary/60']">
+           <i data-lucide="list" class="w-4 h-4"></i> Lista
+         </button>
+         <button @click="viewMode = 'calendar'" :class="['flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2', viewMode === 'calendar' ? 'bg-white text-primary shadow-sm' : 'text-primary/60']">
+           <i data-lucide="calendar" class="w-4 h-4"></i> Calendário
+         </button>
+       </div>
+       
+       <!-- Navegação Mês -->
+       <div v-show="viewMode === 'calendar'" class="flex items-center gap-4 bg-white/50 px-4 py-1 rounded-full border border-pink-50 shadow-sm max-w-full">
+         <button @click="changeMonth(-1)" class="p-2 hover:bg-bgApp rounded-full text-primary transition-colors shrink-0"><i data-lucide="chevron-left" class="w-5 h-5"></i></button>
+         <span class="w-32 truncate max-w-[120px] md:max-w-none text-center text-base md:text-lg font-bold text-primary capitalize select-none">{{ currentMonthLabel }}</span>
+         <button @click="changeMonth(1)" class="p-2 hover:bg-bgApp rounded-full text-primary transition-colors shrink-0"><i data-lucide="chevron-right" class="w-5 h-5"></i></button>
+       </div>
+
+       <!-- Ações Rápidas -->
+       <div class="flex gap-2 w-full md:w-auto">
+         <button @click="openModal('block')" class="flex-1 md:flex-none bg-gray-800 hover:bg-black text-white font-bold py-2.5 px-4 rounded-xl shadow-md flex items-center justify-center gap-2 transition-all active:scale-95 text-xs">
+           <i data-lucide="lock" class="w-4 h-4"></i> <span class="hidden md:inline">Bloqueios</span>
+         </button>
+         <button @click="openModal('create')" class="flex-1 md:flex-none bg-accent hover:bg-pink-600 text-white font-bold py-2.5 px-6 rounded-xl shadow-md flex items-center justify-center gap-2 transition-all active:scale-95 text-xs">
+           <i data-lucide="plus" class="w-4 h-4"></i> <span class="hidden md:inline">Novo Agendamento</span><span class="md:hidden">Novo</span>
+         </button>
+       </div>
+    </div>
+
+    <!-- MODO LISTA / CALENDÁRIO COM TRANSITION EVENTS -->
+    <transition name="fade" mode="out-in" @after-enter="refreshIcons">
+      <!-- MODO LISTA -->
+      <div v-if="viewMode === 'list'" class="bg-surface rounded-2xl shadow-sm border border-white flex flex-col overflow-hidden min-h-[400px]">
+         <div v-if="loading" class="flex-1 flex flex-col items-center justify-center text-secondary gap-3 p-10">
+            <i data-lucide="loader" class="animate-spin w-8 h-8"></i>
+            <span class="text-sm font-medium">Carregando agenda...</span>
+         </div>
+         <div v-else-if="list.length === 0" class="flex-1 flex flex-col items-center justify-center text-gray-400 gap-3 p-10">
+            <i data-lucide="calendar-off" class="w-12 h-12 opacity-30"></i>
+            <span class="text-base font-medium">Nenhum agendamento encontrado.</span>
+         </div>
+         <div v-else class="overflow-x-auto scrolling-touch">
+           <table class="w-full text-left text-sm whitespace-nowrap">
+             <thead class="bg-primary/5 text-primary"><tr><th class="p-4">Data</th><th class="p-4">Cliente / Motivo</th><th class="p-4">Status</th><th class="p-4 text-right">Ações</th></tr></thead>
+             <tbody class="divide-y divide-pink-50">
+               <tr v-for="item in list" :key="item.uuid" class="hover:bg-bgApp/50 transition-colors">
+                 <td class="p-4 font-medium">
+                    <div class="flex items-center gap-2">
+                       <div class="bg-white p-2 rounded-lg border border-pink-50 shadow-sm text-center min-w-[3rem]">
+                          <div class="text-[10px] uppercase font-bold text-gray-400">{{ formatDate(item.data_agendada).split('/')[1] }}</div>
+                          <div class="text-lg font-bold text-primary leading-none">{{ formatDate(item.data_agendada).split('/')[0] }}</div>
+                       </div>
+                       <div>
+                          <div class="text-xs text-secondary font-bold">{{ item.horario_inicio }}</div>
+                          <!-- USO DA NOVA COLUNA horario_fim -->
+                          <div class="text-[10px] text-gray-400">{{ item.horario_fim || '...' }}</div>
+                       </div>
+                    </div>
+                 </td>
+                 <td class="p-4">
+                    <div class="font-bold text-primary">{{ item.nome_cliente }}</div>
+                    <div class="text-xs text-gray-500">{{ item.servico_nome }}</div>
+                 </td>
+                 <td class="p-4"><span :class="badgeClass(item.status)" class="px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider">{{ item.status }}</span></td>
+                 <td class="p-4 text-right">
+                   <button v-if="item.status!=='Bloqueado'" @click="openModal('edit', item)" class="p-2 hover:bg-white rounded-lg text-primary transition-colors mr-1" title="Editar"><i data-lucide="edit-2" class="w-4 h-4"></i></button>
+                   <button @click="deleteItem(item)" class="p-2 hover:bg-red-50 rounded-lg text-red-500 transition-colors" title="Excluir"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                 </td>
+               </tr>
+             </tbody>
+           </table>
+         </div>
+      </div>
+
+      <!-- MODO CALENDÁRIO -->
+      <div v-else class="bg-surface p-2 md:p-6 rounded-3xl shadow-sm border border-white select-none">
+        <div class="grid grid-cols-7 mb-4 text-center text-xs font-bold text-primary/60 uppercase tracking-widest"><div v-for="d in ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb']">{{d}}</div></div>
+        
+        <div class="grid grid-cols-7 gap-1 md:gap-3">
+          <template v-for="day in calendarDays" :key="day.key">
+             <div v-if="day.empty" class="h-24 md:h-32 bg-gray-50/50 rounded-2xl border border-transparent"></div>
+             
+             <div v-else 
+               @click="selectDay(day.fullDate)"
+               :class="['calendar-day h-24 md:h-32 rounded-2xl border p-2 flex flex-col relative cursor-pointer overflow-hidden transition-all', 
+                        isToday(day.fullDate) ? 'bg-white border-accent ring-2 ring-accent/20 shadow-md' : 'bg-white border-pink-50 hover:border-pink-200',
+                        day.isBlocked ? 'blocked-pattern !border-gray-300' : ''
+                        ]">
+              
+              <div v-if="day.isBlocked" class="absolute inset-0 flex items-center justify-center opacity-10 pointer-events-none">
+                 <i data-lucide="lock" class="w-10 h-10 text-gray-600"></i>
+              </div>
+
+              <span :class="['text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full z-10', isToday(day.fullDate) ? 'bg-accent text-white shadow-md' : 'text-primary/70']">
+                {{ day.number }}
+              </span>
+
+              <!-- Dots (Mobile) -->
+              <div class="md:hidden flex flex-wrap justify-center gap-1 content-end mt-auto pb-1 z-10">
+                 <div v-for="evt in day.events" :key="evt.uuid" class="w-1.5 h-1.5 rounded-full" 
+                      :class="{'bg-orange-400': evt.status==='Pendente', 'bg-primary': evt.status==='Confirmado', 'bg-gray-600': evt.status==='Bloqueado'}"></div>
+              </div>
+
+              <!-- Lista (Desktop) -->
+              <div class="hidden md:flex flex-col gap-1 mt-1 z-10 overflow-hidden">
+                 <div v-for="evt in day.events.slice(0, 3)" :key="evt.uuid" 
+                      :class="['text-[10px] px-1.5 py-0.5 rounded truncate font-medium border-l-2', 
+                               evt.status==='Bloqueado' ? 'bg-gray-200 border-gray-500 text-gray-600' : 'bg-primary/5 border-primary text-primary']">
+                   {{ evt.horario_inicio }} {{ evt.status === 'Bloqueado' ? 'BLOQUEADO' : evt.nome_cliente.split(' ')[0] }}
+                 </div>
+                 <div v-if="day.totalCount > 3" class="text-[9px] text-center text-secondary font-bold hover:underline">+{{ day.totalCount - 3 }} mais</div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </transition>
+
+    <!-- SIDEBAR DE DETALHES -->
+    <transition name="slide" @after-enter="refreshIcons">
+      <div v-if="selectedDay" class="fixed inset-0 z-40 flex justify-end">
+          <div @click="closeSelectedDay" class="absolute inset-0 bg-primary/20 backdrop-blur-sm transition-opacity"></div>
+          <div class="relative w-full max-w-md bg-surface h-full shadow-2xl flex flex-col border-l border-pink-100 animate-slide-in-right">
+              <!-- Header Sidebar -->
+              <div class="p-6 border-b border-pink-50 flex justify-between items-start bg-white">
+                 <div>
+                    <h3 class="text-2xl font-bold text-primary capitalize leading-tight">{{ formatDayTitle(selectedDay) }}</h3>
+                    <p class="text-secondary text-sm mt-1 flex items-center gap-2">
+                      <span class="bg-accent/10 text-accent px-2 py-0.5 rounded-md font-bold text-xs">{{ selectedDayEvents.length }}</span> registros
+                    </p>
+                 </div>
+                 <button @click="closeSelectedDay" class="p-2 hover:bg-bgApp rounded-full text-primary transition-colors"><i data-lucide="x" class="w-6 h-6"></i></button>
+              </div>
+              
+              <!-- Lista Sidebar -->
+              <div class="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                  <div v-if="selectedDayEvents.length === 0" class="flex flex-col items-center justify-center h-48 text-gray-400 border-2 border-dashed border-gray-200 rounded-2xl bg-gray-50/50">
+                     <i data-lucide="calendar-plus" class="w-8 h-8 opacity-50 mb-2"></i>
+                     <p class="text-sm">Dia livre.</p>
+                  </div>
+                  
+                  <transition-group name="fade" @after-enter="refreshIcons">
+                    <div v-for="evt in selectedDayEvents" :key="evt.uuid" 
+                         @click="evt.status!=='Bloqueado' && openModal('edit', evt)" 
+                         :class="['p-4 rounded-xl border shadow-sm cursor-pointer flex gap-4 transition-all hover:-translate-y-1 hover:shadow-md relative overflow-hidden', 
+                                  evt.status==='Bloqueado' ? 'bg-gray-100 border-gray-300' : 'bg-white border-pink-50']">
+                        
+                        <div v-if="evt.status==='Bloqueado'" class="absolute -right-4 -top-4 w-16 h-16 bg-gray-200 rounded-full flex items-end justify-start p-3 opacity-50"><i data-lucide="lock" class="w-5 h-5 text-gray-500"></i></div>
+
+                        <div class="text-center min-w-[3.5rem] flex flex-col justify-center border-r border-gray-100 pr-4">
+                           <div class="font-bold text-lg leading-none text-primary">{{ evt.horario_inicio }}</div>
+                           <!-- USO DA NOVA COLUNA horario_fim -->
+                           <div class="text-[10px] text-gray-400 mt-1">{{ evt.horario_fim }}</div>
+                        </div>
+                        <div class="flex-1">
+                           <div class="flex justify-between items-start">
+                              <h4 :class="['font-bold text-sm', evt.status==='Bloqueado'?'text-gray-600 italic':'text-primary']">{{ evt.nome_cliente }}</h4>
+                              <span v-if="evt.status!=='Bloqueado'" :class="badgeClass(evt.status)" class="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase">{{ evt.status }}</span>
+                           </div>
+                           <p class="text-xs text-secondary mt-0.5 line-clamp-1">{{ evt.servico_nome }}</p>
+                           <!-- USO DA NOVA COLUNA valor_cobrado -->
+                           <p v-if="evt.valor_cobrado > 0" class="text-xs font-bold text-gray-400 mt-2">{{ formatMoney(evt.valor_cobrado) }}</p>
+                        </div>
+                        <button @click.stop="deleteItem(evt)" class="self-center p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors z-10" :title="evt.status==='Bloqueado'?'Liberar':'Excluir'">
+                           <i :data-lucide="evt.status==='Bloqueado'?'unlock':'trash-2'" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                  </transition-group>
+              </div>
+              
+              <!-- Footer Sidebar -->
+              <div class="p-4 bg-gray-50 border-t border-gray-100 flex gap-2">
+                  <button @click="openModal('block')" class="flex-1 py-3 bg-gray-800 hover:bg-gray-900 text-white rounded-xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-all text-sm shadow-lg">
+                     <i data-lucide="lock" class="w-4 h-4"></i> Bloqueios
+                  </button>
+                  <button @click="openModal('create')" class="flex-[2] py-3 bg-primary hover:bg-blue-900 text-white rounded-xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-all text-sm shadow-lg shadow-blue-900/20">
+                     <i data-lucide="plus" class="w-4 h-4"></i> Novo Agendamento
+                  </button>
+              </div>
+          </div>
+      </div>
+    </transition>
+    
+    <!-- MODAL UNIFICADO -->
+    <transition name="modal" @after-enter="refreshIcons">
+      <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 backdrop-blur-md p-4" @click.self="closeModal">
+        <div class="bg-surface w-full max-w-md rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-fade-in-up" @click.stop>
+           
+           <!-- Header Modal -->
+           <div :class="['p-5 flex justify-between items-center text-white', modalMode === 'block' ? 'bg-gray-800' : 'bg-primary']">
+            <h3 class="font-bold text-lg flex items-center gap-2">
+              <div class="p-1.5 bg-white/20 rounded-lg"><i :data-lucide="modalMode==='block'?'lock':'calendar'" class="w-5 h-5"></i></div>
+              {{ modalMode==='block' ? 'Gerenciar Bloqueios' : (modalMode === 'create' ? 'Novo Agendamento' : 'Editar') }}
+            </h3>
+            <button @click="closeModal" class="hover:bg-white/20 p-1.5 rounded-full transition-colors"><i data-lucide="x" class="w-5 h-5"></i></button>
+           </div>
+
+           <!-- Body Scroll -->
+           <div class="p-6 space-y-5 overflow-y-auto">
+             
+             <!-- MODO BLOQUEIO (COM LISTAGEM) -->
+             <div v-if="modalMode === 'block'" class="space-y-6">
+                
+                <!-- Lista de Bloqueios Existentes -->
+                <div>
+                  <h4 class="text-sm font-bold text-primary flex items-center gap-2 mb-3">
+                      <i data-lucide="list" class="w-4 h-4 text-secondary"></i> Bloqueios Ativos
+                  </h4>
+                  
+                  <div v-if="blockedList.length === 0" class="text-center p-4 bg-gray-50 rounded-xl border border-dashed border-gray-200 text-xs text-gray-400">
+                      Nenhum bloqueio encontrado.
+                  </div>
+
+                  <div v-else class="max-h-40 overflow-y-auto custom-scrollbar space-y-2 pr-1 border border-gray-100 rounded-xl p-1 bg-gray-50/50">
+                      <div v-for="block in blockedList" :key="block.uuid" class="bg-white border border-gray-200 p-3 rounded-lg flex justify-between items-center shadow-sm">
+                        <div>
+                            <div class="text-xs font-bold text-gray-800">
+                              {{ formatDate(block.data_agendada) }} 
+                              <!-- USO DA NOVA COLUNA horario_fim -->
+                              <span v-if="block.horario_inicio !== '00:00'" class="font-normal text-gray-500">({{ block.horario_inicio }} - {{ block.horario_fim }})</span>
+                              <span v-else class="text-[10px] bg-gray-800 text-white px-1.5 py-0.5 rounded ml-1">Dia Todo</span>
+                            </div>
+                            <div class="text-[10px] text-gray-400">{{ block.servico_nome || 'Sem motivo' }}</div>
+                        </div>
+                        <button @click="deleteItem(block)" class="text-red-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition-colors" title="Desbloquear"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                      </div>
+                  </div>
+                </div>
+                
+                <div class="h-px bg-gray-200"></div>
+
+                <!-- Formulário de Novo Bloqueio -->
+                <div class="space-y-4">
+                  <h4 class="text-sm font-bold text-primary flex items-center gap-2">
+                      <i data-lucide="plus-circle" class="w-4 h-4 text-secondary"></i> Novo Bloqueio
+                  </h4>
+
+                  <div class="bg-yellow-50 border-l-4 border-yellow-400 p-3 rounded-r-lg">
+                    <p class="text-xs text-yellow-800 leading-relaxed">Defina o intervalo. O bloqueio será aplicado a <strong>todos os dias</strong> selecionados.</p>
+                  </div>
+
+                  <div class="grid grid-cols-2 gap-3">
+                    <div>
+                      <label class="block text-xs font-bold text-secondary mb-1">Início</label>
+                      <input v-model="blockForm.data_inicio" type="date" class="w-full bg-white border border-gray-200 rounded-xl p-3 text-sm font-medium focus:ring-2 focus:ring-gray-800 focus:border-transparent outline-none transition-all">
+                    </div>
+                    <div>
+                      <label class="block text-xs font-bold text-secondary mb-1">Fim</label>
+                      <input v-model="blockForm.data_fim" type="date" class="w-full bg-white border border-gray-200 rounded-xl p-3 text-sm font-medium focus:ring-2 focus:ring-gray-800 focus:border-transparent outline-none transition-all">
+                    </div>
+                  </div>
+
+                  <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100 cursor-pointer" @click="blockForm.dia_inteiro = !blockForm.dia_inteiro">
+                    <div :class="['w-5 h-5 rounded border flex items-center justify-center transition-colors', blockForm.dia_inteiro ? 'bg-gray-800 border-gray-800' : 'bg-white border-gray-300']">
+                        <i v-if="blockForm.dia_inteiro" data-lucide="check" class="w-3 h-3 text-white"></i>
+                    </div>
+                    <span class="text-sm font-bold text-gray-700">Dia Inteiro (00:00 - 23:59)</span>
+                  </div>
+
+                  <transition name="slide">
+                    <div v-if="!blockForm.dia_inteiro" class="grid grid-cols-2 gap-3">
+                      <div>
+                        <label class="block text-xs font-bold text-secondary mb-1">De (Horário)</label>
+                        <input v-model="blockForm.horario_inicio" type="time" class="w-full bg-white border border-gray-200 rounded-xl p-3 text-sm">
+                      </div>
+                      <div>
+                        <label class="block text-xs font-bold text-secondary mb-1">Até (Horário)</label>
+                        <input v-model="blockForm.horario_fim" type="time" class="w-full bg-white border border-gray-200 rounded-xl p-3 text-sm">
+                      </div>
+                    </div>
+                  </transition>
+                  
+                  <div>
+                    <label class="block text-xs font-bold text-secondary mb-1">Motivo (Opcional)</label>
+                    <input v-model="blockForm.obs" class="w-full bg-white border border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-gray-800 outline-none" placeholder="Ex: Férias, Médico...">
+                  </div>
+                </div>
+             </div>
+
+             <!-- MODO AGENDAMENTO (PADRÃO) -->
+             <div v-else class="space-y-4">
+               <div class="grid grid-cols-2 gap-3">
+                 <div>
+                   <label class="block text-xs font-bold text-secondary mb-1">Cliente</label>
+                   <input v-model="form.nome_cliente" class="w-full bg-white border border-pink-100 rounded-xl p-3 text-sm focus:ring-2 focus:ring-accent outline-none" placeholder="Nome">
+                 </div>
+                 <div>
+                   <label class="block text-xs font-bold text-secondary mb-1">Celular</label>
+                   <input v-model="form.celular" class="w-full bg-white border border-pink-100 rounded-xl p-3 text-sm focus:ring-2 focus:ring-accent outline-none" placeholder="(99) ...">
+                 </div>
+               </div>
+               
+               <div>
+                 <label class="block text-xs font-bold text-secondary mb-1">Serviço</label>
+                 <select v-model="form.servico_id" class="w-full bg-white border border-pink-100 rounded-xl p-3 text-sm focus:ring-2 focus:ring-accent outline-none">
+                   <option value="" disabled>Selecione...</option>
+                   <option v-for="svc in servicesList" :key="svc.id" :value="svc.id">{{ svc.nome }} - {{ formatMoney(svc.preco) }}</option>
+                 </select>
+               </div>
+
+               <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-xs font-bold text-secondary mb-1">Data</label>
+                    <input v-model="form.data_agendada" type="date" class="w-full bg-white border border-pink-100 rounded-xl p-3 text-sm font-bold text-primary">
+                  </div>
+                  <div>
+                    <label class="block text-xs font-bold text-secondary mb-1">Horário</label>
+                    <input v-model="form.horario_inicio" type="time" class="w-full bg-white border border-pink-100 rounded-xl p-3 text-sm font-bold text-primary">
+                  </div>
+               </div>
+
+               <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-xs font-bold text-secondary mb-1">Valor</label>
+                    <div class="relative">
+                      <span class="absolute left-3 top-3 text-gray-400 text-xs">R$</span>
+                      <input v-model.number="form.valor" type="number" step="0.01" class="w-full bg-white border border-pink-100 rounded-xl p-3 pl-8 text-sm">
+                    </div>
+                  </div>
+                  <div>
+                    <label class="block text-xs font-bold text-secondary mb-1">Status</label>
+                    <select v-model="form.status" class="w-full bg-white border border-pink-100 rounded-xl p-3 text-sm">
+                      <option>Pendente</option>
+                      <option>Confirmado</option>
+                      <option>Concluido</option>
+                      <option>Cancelado</option>
+                    </select>
+                  </div>
+               </div>
+               
+               <div>
+                 <label class="block text-xs font-bold text-secondary mb-1">Observações</label>
+                 <textarea v-model="form.obs" rows="2" class="w-full bg-white border border-pink-100 rounded-xl p-3 text-sm focus:ring-2 focus:ring-accent outline-none" placeholder="Alergias..."></textarea>
+               </div>
+             </div>
+           </div>
+           
+           <!-- Footer Modal -->
+           <div class="p-5 bg-gray-50 flex justify-end gap-3 border-t border-gray-100">
+              <button @click="closeModal" class="px-5 py-2.5 text-gray-500 font-bold text-sm rounded-xl hover:bg-gray-200 transition-colors">Cancelar</button>
+              
+              <button v-if="modalMode==='block'" @click="saveBlock" class="px-6 py-2.5 bg-gray-800 text-white font-bold rounded-xl shadow-lg hover:bg-black transition-transform active:scale-95 flex items-center gap-2">
+                <i data-lucide="lock" class="w-4 h-4"></i> Adicionar Bloqueio
+              </button>
+              
+              <button v-else @click="saveAppointment" class="px-6 py-2.5 bg-primary text-white font-bold rounded-xl shadow-lg shadow-blue-900/20 hover:bg-blue-900 transition-transform active:scale-95 flex items-center gap-2">
+                <i data-lucide="check" class="w-4 h-4"></i> Salvar
+              </button>
+           </div>
+        </div>
+      </div>
+    </transition>
+
+  </div>
+</template>
