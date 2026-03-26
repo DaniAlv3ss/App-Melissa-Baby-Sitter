@@ -1,0 +1,86 @@
+<template id="view-services">
+  <div class="space-y-6 animate-fade-in relative pb-10">
+    
+    <!-- HEADER -->
+    <div class="flex flex-col md:flex-row justify-between items-center bg-surface p-4 rounded-2xl shadow-sm border border-pink-50 gap-4">
+       <div>
+         <h2 class="text-lg font-bold text-primary">Catálogo de Serviços</h2>
+         <p class="text-xs text-secondary">Gerencie preços e descrições.</p>
+       </div>
+       <button @click="openModal('create')" class="bg-accent hover:bg-pink-600 text-white font-bold py-2 px-6 rounded-xl shadow-md flex items-center gap-2 transition-transform active:scale-95 text-sm">
+         <i data-lucide="plus" class="w-4 h-4"></i> Novo Serviço
+       </button>
+    </div>
+
+    <!-- LISTA -->
+    <div v-if="loading" class="text-center py-10 text-secondary"><i data-lucide="loader" class="animate-spin w-6 h-6 mx-auto"></i> Carregando...</div>
+    
+    <div v-else v-for="(items, category) in groupedServices" :key="category" class="space-y-3">
+       <div class="flex items-center gap-3 px-2 mt-6">
+          <div class="h-px bg-pink-200 flex-1"></div>
+          <span class="text-sm font-bold text-primary uppercase tracking-wider bg-bgApp px-3 rounded-full border border-pink-100">{{ formatCategory(category) }}</span>
+          <div class="h-px bg-pink-200 flex-1"></div>
+       </div>
+
+       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div v-for="service in items" :key="service.id" :class="['p-5 rounded-2xl border transition-all hover:shadow-md relative', service.ativo ? 'bg-surface border-white' : 'bg-gray-50 border-gray-100 opacity-60']">
+             <div class="absolute top-4 right-4 font-bold text-primary bg-white/80 px-2 py-1 rounded-lg shadow-sm text-sm">{{ formatMoney(service.preco) }}</div>
+             <div class="pr-16">
+                <h3 class="font-bold text-primary text-base leading-tight mb-1">{{ service.nome }}</h3>
+                <div class="flex items-center gap-2 text-xs text-secondary mb-2"><i data-lucide="clock" class="w-3 h-3"></i> {{ formatDuration(service.duracao_min) }}</div>
+                <p class="text-[10px] text-gray-500 line-clamp-2 min-h-[2em]">{{ service.descricao || 'Sem descrição.' }}</p>
+             </div>
+             <div class="flex items-center justify-between pt-3 border-t border-pink-50/50 mt-3">
+                <button @click="toggleStatus(service)" class="text-[10px] font-bold uppercase tracking-wider" :class="service.ativo ? 'text-green-600' : 'text-gray-400'">{{ service.ativo ? 'Ativo' : 'Inativo' }}</button>
+                <div class="flex gap-2">
+                   <button @click="openModal('edit', service)" class="text-primary hover:text-blue-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>
+                   <button @click="deleteService(service.id)" class="text-secondary hover:text-red-500"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                </div>
+             </div>
+          </div>
+       </div>
+    </div>
+
+    <!-- MODAL COM TAILWIND INLINE (CORRIGIDO) -->
+    <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 backdrop-blur-sm p-4" @click.self="closeModal">
+      <div class="bg-surface w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-fade-in flex flex-col max-h-[90vh]" @click.stop>
+         <div class="bg-primary p-4 flex justify-between items-center text-white shrink-0">
+          <h3 class="font-bold text-lg">{{ modalMode === 'create' ? 'Novo Serviço' : 'Editar Serviço' }}</h3>
+          <button @click="closeModal"><i data-lucide="x" class="w-5 h-5"></i></button>
+         </div>
+         <div class="p-6 space-y-4 overflow-y-auto">
+           <div>
+             <label class="block text-xs font-bold text-secondary mb-1">Nome</label>
+             <input v-model="form.nome" class="w-full bg-bgApp/30 border border-pink-100 rounded-lg p-2.5 text-primary focus:outline-none focus:border-accent text-sm" placeholder="Ex: Corte Bordado">
+           </div>
+           <div>
+             <label class="block text-xs font-bold text-secondary mb-1">Categoria</label>
+             <select v-model="form.categoria" class="w-full bg-bgApp/30 border border-pink-100 rounded-lg p-2.5 text-primary focus:outline-none focus:border-accent text-sm">
+               <option value="Externo">Atendimento Externo</option>
+               <option value="Residencia">Residência Tia Mel</option>
+               <option value="Pacotes">Pacotes Mensais</option>
+             </select>
+           </div>
+           <div class="grid grid-cols-2 gap-4">
+             <div>
+                <label class="block text-xs font-bold text-secondary mb-1">Preço (R$)</label>
+                <input v-model.number="form.preco" type="number" step="0.01" class="w-full bg-bgApp/30 border border-pink-100 rounded-lg p-2.5 text-primary focus:outline-none focus:border-accent text-sm">
+             </div>
+             <div>
+                <label class="block text-xs font-bold text-secondary mb-1">Duração (min)</label>
+                <input v-model.number="form.duracao_min" type="number" step="15" class="w-full bg-bgApp/30 border border-pink-100 rounded-lg p-2.5 text-primary focus:outline-none focus:border-accent text-sm">
+             </div>
+           </div>
+           <div>
+              <label class="block text-xs font-bold text-secondary mb-1">Descrição (Visível para o cliente)</label>
+              <textarea v-model="form.descricao" rows="3" class="w-full bg-bgApp/30 border border-pink-100 rounded-lg p-2.5 text-primary focus:outline-none focus:border-accent text-sm" placeholder="Detalhes do serviço..."></textarea>
+           </div>
+         </div>
+         <div class="p-4 bg-gray-50 flex justify-end gap-3 border-t border-gray-100 shrink-0">
+            <button @click="closeModal" class="px-4 py-2 text-gray-500 font-medium text-sm rounded-lg hover:bg-gray-100 transition-colors">Cancelar</button>
+            <button @click="saveService" class="px-6 py-2 bg-primary text-white font-bold rounded-lg hover:bg-blue-900 transition-colors shadow-md active:scale-95">Salvar</button>
+         </div>
+      </div>
+    </div>
+  </div>
+</template>
