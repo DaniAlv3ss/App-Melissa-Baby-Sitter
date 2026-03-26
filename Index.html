@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Painel Tia Mel</title>
+    
+    <!-- LIBS -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <?!= include('Styles'); ?>
+  </head>
+  <body class="bg-bgApp text-primary h-screen overflow-hidden selection:bg-accent selection:text-white">
+
+    <div id="app" class="h-full flex flex-col md:flex-row relative">
+      
+      <!-- TOAST CONTAINER -->
+      <toast-container :items="toasts"></toast-container>
+
+      <!-- SETUP SCREEN -->
+      <div v-if="appState === 'loading'" class="fixed inset-0 z-[60] flex items-center justify-center bg-bgApp/95 backdrop-blur-sm">
+        <div class="flex flex-col items-center">
+           <div class="animate-spin rounded-full h-12 w-12 border-b-4 border-accent mb-4"></div>
+           <p class="text-primary font-bold animate-pulse">Iniciando sistema...</p>
+        </div>
+      </div>
+
+      <div v-else-if="appState === 'setup'" class="w-full h-full flex items-center justify-center p-4">
+        <div class="bg-surface p-8 rounded-2xl shadow-xl max-w-md w-full text-center border-t-4 border-accent animate-fade-in-up">
+          <img src="https://lh3.googleusercontent.com/d/1Mdxt_r8fQdhc5ZT0uBqNLHV0Ug5ke46k" alt="Logo Tia Mel" class="h-20 w-auto object-contain mx-auto mb-4 drop-shadow-md">
+          <h1 class="text-2xl font-bold text-primary mb-2">Bem-vinda, Tia Mel!</h1>
+          <p class="text-secondary mb-6 text-sm">Vamos configurar seu banco de dados pela primeira vez.</p>
+          <button @click="runSetup" :disabled="setupLoading" class="w-full bg-accent hover:bg-pink-600 text-white font-bold py-3 px-6 rounded-xl transition-all active:scale-95 shadow-lg flex justify-center gap-2">
+            <span v-if="setupLoading" class="animate-spin">⏳</span>
+            {{ setupLoading ? 'Configurando...' : '🚀 Iniciar Instalação' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- MAIN APP -->
+      <div v-else class="flex w-full h-full relative transition-all">
+        
+        <!-- SIDEBAR -->
+        <aside v-if="showSidebar" :class="['fixed inset-y-0 left-0 z-30 w-72 bg-surface shadow-2xl transition-transform duration-300 md:relative md:translate-x-0 md:shadow-none md:border-r md:border-pink-100 flex flex-col', mobileMenuOpen ? 'translate-x-0' : '-translate-x-full']">
+          <div class="p-6 border-b border-pink-100 flex items-center gap-3 cursor-pointer group" @click="navigate('menu')">
+             <img src="https://lh3.googleusercontent.com/d/1Mdxt_r8fQdhc5ZT0uBqNLHV0Ug5ke46k" alt="Logo" class="h-14 w-auto object-contain drop-shadow-sm group-hover:scale-105 transition-transform">
+             <div>
+               <h1 class="font-bold text-lg text-primary leading-tight">Tia Mel</h1>
+               <p class="text-[10px] text-primary/60 font-medium tracking-wider uppercase">Painel de Gestão</p>
+             </div>
+          </div>
+          
+          <nav class="flex-1 p-4 space-y-1 overflow-y-auto scrolling-touch">
+            <template v-for="item in menuItems" :key="item.id">
+              <a @click="navigate(item.id)" 
+                 :class="['flex items-center gap-3 p-3.5 rounded-xl cursor-pointer transition-all font-medium text-sm border border-transparent', currentView === item.id ? 'bg-primary text-white shadow-lg border-primary/20' : 'text-primary/70 hover:bg-bgApp hover:text-primary hover:border-pink-100']">
+                <i :data-lucide="item.icon" class="w-5 h-5"></i> {{ item.label }}
+              </a>
+            </template>
+          </nav>
+          
+          <div class="p-4 border-t border-pink-50">
+             <a @click="navigate('menu')" class="flex items-center gap-3 p-3 rounded-xl cursor-pointer text-secondary hover:bg-bgApp hover:text-primary transition-all text-sm font-medium">
+                <i data-lucide="grid" class="w-5 h-5"></i> Voltar ao Início
+             </a>
+          </div>
+        </aside>
+        
+        <!-- Overlay Mobile -->
+        <div v-if="mobileMenuOpen && showSidebar" @click="mobileMenuOpen = false" class="fixed inset-0 bg-primary/40 backdrop-blur-sm z-20 md:hidden transition-opacity"></div>
+
+        <!-- CONTENT AREA -->
+        <main class="flex-1 h-full overflow-hidden flex flex-col bg-bgApp relative w-full">
+          <!-- Mobile Header -->
+          <header v-if="showSidebar" class="md:hidden flex justify-between items-center p-4 bg-surface/90 backdrop-blur-md sticky top-0 z-10 shadow-sm h-16 border-b border-pink-50">
+            <h2 class="font-bold text-primary text-lg flex items-center gap-2">
+               <i :data-lucide="menuItems.find(i=>i.id===currentView)?.icon" class="w-5 h-5 text-accent"></i>
+               {{ currentViewLabel }}
+            </h2>
+            <button @click="mobileMenuOpen = true" class="p-2 bg-white rounded-lg text-primary shadow-sm active:bg-pink-50"><i data-lucide="menu"></i></button>
+          </header>
+
+          <!-- Dynamic View -->
+          <div class="flex-1 overflow-y-auto scrolling-touch p-4 md:p-8">
+            <div class="max-w-7xl mx-auto h-full">
+              <!-- Desktop Header -->
+              <div v-if="showSidebar" class="hidden md:flex items-center gap-3 mb-6 animate-fade-in">
+                 <div class="p-2 bg-white rounded-lg shadow-sm text-accent"><i :data-lucide="menuItems.find(i=>i.id===currentView)?.icon" class="w-6 h-6"></i></div>
+                 <h2 class="text-2xl font-bold text-primary">{{ currentViewLabel }}</h2>
+              </div>
+
+              <transition name="fade" mode="out-in">
+                <component :is="currentViewComponent" :items="menuItems" @navigate="navigate"></component>
+              </transition>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <!-- TEMPLATE MENU -->
+    <template id="view-menu">
+      <div class="h-full flex flex-col items-center justify-center animate-fade-in py-10">
+         <img src="https://lh3.googleusercontent.com/d/1Mdxt_r8fQdhc5ZT0uBqNLHV0Ug5ke46k" class="h-24 md:h-32 mb-6 drop-shadow-xl hover:scale-105 transition-transform duration-500 object-contain">
+         <h1 class="text-2xl md:text-4xl font-bold text-primary mb-2 text-center">Olá, Tia Mel!</h1>
+         <p class="text-secondary mb-8 text-center max-w-xs md:max-w-md text-sm md:text-base opacity-80">Gerencie seu negócio de forma simples e profissional.</p>
+         
+         <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6 w-full max-w-4xl px-4">
+            <div v-for="item in items" :key="item.id" @click="$emit('navigate', item.id)"
+                 class="bg-surface p-4 md:p-8 rounded-3xl shadow-sm hover:shadow-xl border border-white hover:border-accent/30 cursor-pointer transition-all group flex flex-col items-center text-center gap-4 hover:-translate-y-2 active:scale-95 duration-300">
+               <div class="w-12 h-12 md:w-16 md:h-16 rounded-2xl bg-primary/5 text-primary group-hover:bg-primary group-hover:text-white flex items-center justify-center transition-colors shadow-inner group-hover:shadow-lg">
+                  <i :data-lucide="item.icon" class="w-6 h-6 md:w-8 md:h-8"></i>
+               </div>
+               <div>
+                  <h3 class="font-bold text-primary text-sm md:text-lg">{{ item.label }}</h3>
+                  <p class="text-[10px] md:text-xs text-secondary mt-1 opacity-80 hidden md:block leading-tight">{{ item.desc }}</p>
+               </div>
+            </div>
+         </div>
+      </div>
+    </template>
+
+    <!-- INCLUDES CORRIGIDOS -->
+    <?!= include('ViewHome'); ?>
+    <?!= include('ViewAgenda'); ?>
+    <?!= include('ViewServices'); ?>
+    <?!= include('ViewFinanceiro'); ?>
+    <?!= include('ClientJS'); ?>
+  </body>
+</html>
