@@ -1,0 +1,532 @@
+<script>
+  const { createApp, ref, computed, onMounted, nextTick, reactive, watch, inject, provide, onUpdated } = Vue;
+
+  // --- HELPERS GLOBAIS ---
+  const formatMoney = (val) => {
+    return val ? `R$ ${Number(val).toLocaleString('pt-BR', {minimumFractionDigits: 2})}` : 'R$ 0,00';
+  };
+  
+  const formatDateGeneric = (d) => {
+    if(!d) return '';
+    try {
+      if(d instanceof Date) return d.toLocaleDateString('pt-BR');
+      let dateStr = String(d);
+      if (dateStr.includes('T')) dateStr = dateStr.split('T')[0];
+      const parts = dateStr.split('-');
+      if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+      return dateStr;
+    } catch(e) { return String(d || ''); }
+  };
+
+  // --- TOAST SYSTEM ---
+  const useToast = () => {
+    const toasts = ref([]);
+    const addToast = (msg, type = 'success') => {
+      const id = Date.now();
+      toasts.value.push({ id, msg, type });
+      setTimeout(() => removeToast(id), 4000);
+    };
+    const removeToast = (id) => toasts.value = toasts.value.filter(t => t.id !== id);
+    return { toasts, addToast, removeToast };
+  };
+
+  // --- COMPONENTES UI ---
+  const ToastContainer = {
+    props: ['items'],
+    template: `
+      <div class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none">
+        <transition-group name="slide">
+          <div v-for="t in items" :key="t.id" class="pointer-events-auto min-w-[300px] p-4 rounded-xl shadow-xl border-l-4 flex items-center gap-3 bg-white" 
+               :class="t.type==='success'?'border-green-500 text-green-900':(t.type==='info'?'border-blue-500 text-blue-900':'border-red-500 text-red-900')">
+            <i :data-lucide="t.type==='success'?'check-circle':(t.type==='info'?'loader':'alert-circle')" :class="{'animate-spin':t.type==='info'}" class="w-5 h-5"></i>
+            <span class="font-medium text-sm">{{ t.msg }}</span>
+          </div>
+        </transition-group>
+      </div>
+    `,
+    updated() { nextTick(() => lucide.createIcons()); }
+  };
+
+  const DashboardCard = {
+    props: ['icon', 'title', 'value', 'label', 'color', 'pulse'],
+    template: `
+      <div class="bg-surface p-5 rounded-2xl shadow-sm border border-white hover:border-accent/20 transition-all group hover:-translate-y-1 duration-300 h-full flex flex-col justify-between">
+        <div class="flex justify-between items-start mb-2">
+          <div :class="['p-2 rounded-lg transition-colors group-hover:bg-opacity-20', colorClass.bg]"><i :data-lucide="icon" class="w-5 h-5"></i></div>
+          <span v-if="pulse" class="text-[10px] font-bold text-accent bg-accent/10 px-2 py-0.5 rounded-full animate-pulse">Ação</span>
+        </div>
+        <div>
+          <div :class="['text-2xl font-bold truncate', colorClass.text]">{{ value }}</div>
+          <div class="text-xs text-gray-500 font-medium">{{ label }}</div>
+        </div>
+      </div>
+    `,
+    computed: {
+      colorClass() {
+        const maps = { 'primary': { bg: 'bg-primary/10 text-primary', text: 'text-primary' }, 'secondary': { bg: 'bg-orange-50 text-orange-600', text: 'text-gray-700' }, 'green': { bg: 'bg-green-50 text-green-600', text: 'text-green-700' }, 'red': { bg: 'bg-red-50 text-red-600', text: 'text-red-700' } };
+        return maps[this.color] || maps['primary'];
+      }
+    },
+    mounted() { nextTick(() => lucide.createIcons()); },
+    updated() { nextTick(() => lucide.createIcons()); }
+  };
+
+  // --- VIEW AGENDA (LÓGICA REFEITA DO ZERO) ---
+  const ViewAgenda = {
+    template: '#view-agenda',
+    setup() {
+      const showToast = inject('showToast');
+      
+      // --- ESTADO ---
+      const viewMode = ref('calendar'); // 'calendar' | 'list'
+      const loading = ref(false);
+      const list = ref([]); // Lista bruta processada
+      const servicesList = ref([]); // Lista de serviços para o select
+      
+      // Navegação
+      const currentDate = ref(new Date());
+      const selectedDay = ref(null); // String 'yyyy-mm-dd'
+      
+      // Modais
+      const showModal = ref(false);
+      const modalMode = ref('create'); // 'create', 'edit', 'block'
+
+      // Formulários
+      const form = reactive({
+        uuid: null,
+        nome_cliente: '',
+        celular: '',
+        servico_id: '',
+        servico_nome: '',
+        data_agendada: '',
+        horario_inicio: '09:00',
+        duracao_min: 60,
+        horario_fim_calc: '', // Apenas visual/auxiliar
+        valor: 0,
+        status: 'Confirmado',
+        obs: ''
+      });
+
+      const blockForm = reactive({
+        data_inicio: '',
+        data_fim: '',
+        horario_inicio: '08:00',
+        horario_fim: '18:00',
+        dia_inteiro: true,
+        obs: ''
+      });
+
+      // --- HELPERS INTERNOS ---
+      const refreshIcons = () => nextTick(() => lucide.createIcons());
+
+      const calculateEndTime = (start, duration) => {
+        if (!start) return '';
+        const [h, m] = start.split(':').map(Number);
+        const totalMin = (h * 60) + m + (parseInt(duration) || 0);
+        let endH = Math.floor(totalMin / 60);
+        const endM = totalMin % 60;
+        if (endH >= 24) endH = endH % 24;
+        return `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+      };
+
+      // --- DATA FETCHING SIMPLIFICADO ---
+      const fetchData = () => {
+        loading.value = true;
+        google.script.run
+          .withSuccessHandler(data => {
+            // Atribuição direta sem processamento complexo
+            list.value = data || [];
+            loading.value = false;
+            refreshIcons();
+          })
+          .getAllAgendamentos();
+      };
+
+      const fetchServices = () => {
+        google.script.run.withSuccessHandler(data => {
+          servicesList.value = data.filter(s => s.ativo);
+        }).getServicosAdmin();
+      };
+
+      // --- COMPUTED PROPERTIES ---
+      
+      // 1. Calendário Lógico
+      const calendarDays = computed(() => {
+        const y = currentDate.value.getFullYear();
+        const m = currentDate.value.getMonth();
+        const firstDayDow = new Date(y, m, 1).getDay(); // 0 = Domingo
+        const daysInMonth = new Date(y, m + 1, 0).getDate();
+        
+        const days = [];
+        
+        // Preenchimento inicial (dias vazios)
+        for (let i = 0; i < firstDayDow; i++) {
+          days.push({ empty: true, key: `e-${i}` });
+        }
+
+        // Dias do mês
+        for (let d = 1; d <= daysInMonth; d++) {
+          const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+          
+          // Filtra eventos deste dia exato
+          const dayEvents = list.value.filter(e => e.data_agendada === dateStr);
+          
+          // Verifica bloqueios (checa status case-insensitive)
+          const hasFullBlock = dayEvents.some(e => (e.status||'').toLowerCase() === 'bloqueado' && Number(e.duracao_min) >= 1440);
+          const hasPartialBlock = dayEvents.some(e => (e.status||'').toLowerCase() === 'bloqueado' && Number(e.duracao_min) < 1440);
+
+          days.push({
+            empty: false,
+            number: d,
+            fullDate: dateStr,
+            key: dateStr,
+            events: dayEvents, // Lista bruta de eventos do dia
+            isBlocked: hasFullBlock,
+            hasPartialBlock: hasPartialBlock,
+            totalCount: dayEvents.length
+          });
+        }
+        return days;
+      });
+
+      // 2. Eventos do Dia Selecionado (Sidebar)
+      const selectedDayEvents = computed(() => {
+        if (!selectedDay.value) return [];
+        return list.value
+          .filter(e => e.data_agendada === selectedDay.value)
+          .sort((a, b) => a.horario_inicio.localeCompare(b.horario_inicio));
+      });
+
+      // 3. Lista de Bloqueios (Para o Modal)
+      const blockedList = computed(() => {
+        return list.value
+          .filter(e => (e.status||'').toLowerCase() === 'bloqueado')
+          .sort((a, b) => {
+             // Ordena por data decrescente
+             return (b.data_agendada || '').localeCompare(a.data_agendada || '');
+          });
+      });
+
+      // 4. Label do Mês
+      const currentMonthLabel = computed(() => {
+        return currentDate.value.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+      });
+
+      // --- WATCHERS (Lógica Reativa) ---
+      
+      // Atualizar ícones ao navegar
+      watch([viewMode, selectedDay, showModal], refreshIcons);
+
+      // Auto-preencher dados ao selecionar serviço
+      watch(() => form.servico_id, (newId) => {
+        const svc = servicesList.value.find(s => s.id === newId);
+        if (svc) {
+          form.servico_nome = svc.nome;
+          form.valor = svc.preco;
+          form.duracao_min = svc.duracao_minutos || 60;
+        }
+      });
+
+      // Calcular horário final automaticamente
+      watch([() => form.horario_inicio, () => form.duracao_min], ([start, dur]) => {
+        form.horario_fim_calc = calculateEndTime(start, dur);
+      });
+
+      // Máscara de Celular
+      watch(() => form.celular, (val) => {
+        if (!val) return;
+        let r = val.replace(/\D/g, "").replace(/^0/, "");
+        if (r.length > 10) r = r.replace(/^(\d\d)(\d{5})(\d{4}).*/, "($1) $2-$3");
+        else if (r.length > 5) r = r.replace(/^(\d\d)(\d{4})(\d{0,4}).*/, "($1) $2-$3");
+        else if (r.length > 2) r = r.replace(/^(\d\d)(\d{0,5})/, "($1) $2");
+        else r = r.replace(/^(\d*)/, "($1");
+        if (val !== r) form.celular = r;
+      });
+
+      // --- ACTIONS ---
+
+      const changeMonth = (delta) => {
+        const d = new Date(currentDate.value);
+        d.setMonth(d.getMonth() + delta);
+        currentDate.value = d;
+      };
+
+      const selectDay = (dateStr) => {
+        selectedDay.value = dateStr;
+      };
+
+      const openModal = (mode, item = null) => {
+        modalMode.value = mode;
+        showModal.value = true;
+
+        if (mode === 'create') {
+          // Reset form para criação
+          Object.assign(form, {
+            uuid: null,
+            nome_cliente: '',
+            celular: '',
+            servico_id: '',
+            servico_nome: '',
+            data_agendada: selectedDay.value || new Date().toISOString().split('T')[0],
+            horario_inicio: '09:00',
+            duracao_min: 60,
+            valor: 0,
+            status: 'Confirmado',
+            obs: ''
+          });
+        } else if (mode === 'block') {
+          // Reset block form
+          const today = selectedDay.value || new Date().toISOString().split('T')[0];
+          Object.assign(blockForm, {
+            data_inicio: today,
+            data_fim: today,
+            horario_inicio: '08:00',
+            horario_fim: '18:00',
+            dia_inteiro: true,
+            obs: ''
+          });
+        } else if (mode === 'edit' && item) {
+          // Popular form para edição (Mapeamento Reverso)
+          Object.assign(form, {
+            uuid: item.uuid,
+            nome_cliente: item.nome_cliente,
+            celular: item.celular_display,
+            servico_nome: item.servico_nome,
+            servico_id: '', // Pode não bater se o serviço foi deletado, ok
+            data_agendada: item.data_agendada,
+            horario_inicio: item.horario_inicio,
+            duracao_min: item.duracao_min,
+            valor: item.valor_cobrado,
+            status: item.status,
+            obs: item.obs_admin
+          });
+        }
+      };
+
+      const closeModal = () => {
+        showModal.value = false;
+      };
+
+      // SALVAR AGENDAMENTO
+      const saveAppointment = () => {
+        if (!form.nome_cliente || !form.data_agendada) {
+          return showToast("Preencha nome e data", "error");
+        }
+        
+        showModal.value = false;
+        showToast("Salvando...", "info");
+        
+        // Copia simples dos dados para envio
+        const payload = JSON.parse(JSON.stringify(form));
+        
+        google.script.run
+          .withSuccessHandler(res => {
+            if (res.success) {
+              showToast("Salvo com sucesso!");
+              fetchData(); // Recarrega lista
+            } else {
+              showToast(res.error || "Erro ao salvar", "error");
+            }
+          })
+          .withFailureHandler(err => showToast("Erro de conexão", "error"))
+          .saveAgendamento(payload);
+      };
+
+      // SALVAR BLOQUEIO
+      const saveBlock = () => {
+        if (!blockForm.data_inicio || !blockForm.data_fim) {
+          return showToast("Datas inválidas", "error");
+        }
+
+        showToast("Criando bloqueios...", "info");
+        const payload = JSON.parse(JSON.stringify(blockForm));
+
+        google.script.run
+          .withSuccessHandler(res => {
+            if (res.success) {
+              showToast("Bloqueio criado!");
+              blockForm.obs = ''; // Limpa obs apenas
+              fetchData();
+            } else {
+              showToast(res.error || "Erro ao bloquear", "error");
+            }
+          })
+          .withFailureHandler(err => showToast("Erro de conexão", "error"))
+          .saveBlockRange(payload);
+      };
+
+      // DELETAR / DESBLOQUEAR
+      const deleteItem = (item) => {
+        const action = (item.status||'').toLowerCase() === 'bloqueado' ? "Desbloquear" : "Excluir";
+        if (!confirm(`${action} este item?`)) return;
+
+        // Otimistic update (remove da lista visualmente antes)
+        list.value = list.value.filter(i => i.uuid !== item.uuid);
+        
+        google.script.run
+          .withSuccessHandler(res => {
+            if (res.success) showToast("Removido com sucesso!");
+            else {
+              showToast("Erro ao remover", "error");
+              fetchData(); // Reverte se der erro
+            }
+          })
+          .deleteAgendamento(item.uuid);
+      };
+
+      // Inicialização
+      onMounted(() => {
+        fetchData();
+        fetchServices();
+      });
+
+      return {
+        // Estado
+        viewMode, loading, list, servicesList,
+        currentDate, selectedDay,
+        showModal, modalMode,
+        form, blockForm,
+        
+        // Computed
+        calendarDays,
+        selectedDayEvents,
+        blockedList,
+        currentMonthLabel,
+        
+        // Actions
+        changeMonth,
+        selectDay,
+        closeSelectedDay: () => selectedDay.value = null,
+        openModal,
+        closeModal,
+        saveAppointment,
+        saveBlock,
+        deleteItem,
+        
+        // UI Helpers
+        formatMoney,
+        formatDate: formatDateGeneric,
+        refreshIcons,
+        formatDayTitle: (d) => {
+           if(!d) return ''; 
+           const [y,m,day] = d.split('-'); 
+           return new Date(y,m-1,day).toLocaleDateString('pt-BR', {weekday:'long', day:'numeric', month:'long'}); 
+        },
+        badgeClass: (s) => ({
+          'Pendente': 'bg-orange-50 text-orange-600',
+          'Confirmado': 'bg-primary/10 text-primary',
+          'Concluido': 'bg-green-50 text-green-700',
+          'Cancelado': 'bg-red-50 text-red-600',
+          'Bloqueado': 'bg-gray-800 text-white'
+        }[s] || 'bg-gray-100 text-gray-600'),
+        isToday: (d) => d === new Date().toISOString().split('T')[0]
+      };
+    }
+  };
+
+  const ViewServices = {
+    template: '#view-services',
+    setup() {
+      const showToast = inject('showToast');
+      const services = ref([]);
+      const showModal = ref(false);
+      const modalMode = ref('create');
+      const form = reactive({ id: null, categoria: 'Externo', nome: '', duracao_min: 60, preco: 0, descricao: '', ativo: true });
+      const loading = ref(false);
+      const fetchServices = () => {
+        loading.value = true;
+        google.script.run.withSuccessHandler(data => {
+          services.value = data.map(s => ({ ...s, duracao_min: s.duracao_minutos || 60 }));
+          loading.value = false;
+          nextTick(() => lucide.createIcons());
+        }).getServicosAdmin(); 
+      };
+      const groupedServices = computed(() => {
+        return services.value.reduce((acc, curr) => { 
+          const cat = curr.categoria || 'Geral'; 
+          (acc[cat] = acc[cat] || []).push(curr); 
+          return acc; 
+        }, {});
+      });
+      const openModal = (mode, item) => {
+        modalMode.value = mode;
+        if (mode === 'create') Object.assign(form, { id: null, categoria: 'Externo', nome: '', duracao_min: 60, preco: 0, descricao: '', ativo: true });
+        else Object.assign(form, item);
+        showModal.value = true;
+        nextTick(() => lucide.createIcons());
+      };
+      const saveService = () => { showModal.value = false; showToast('Salvando...', 'info'); google.script.run.withSuccessHandler(() => { fetchServices(); showToast('Serviço salvo!'); }).saveServico(JSON.parse(JSON.stringify(form))); };
+      const deleteService = (id) => { if(confirm('Excluir?')) { services.value = services.value.filter(s => s.id !== id); google.script.run.withSuccessHandler(() => fetchServices()).deleteServico(id); } };
+      const toggleStatus = (service) => { service.ativo = !service.ativo; google.script.run.saveServico(JSON.parse(JSON.stringify(service))); showToast(service.ativo ? 'Ativado' : 'Desativado'); };
+      onMounted(() => { fetchServices(); nextTick(() => lucide.createIcons()); });
+      onUpdated(() => { nextTick(() => lucide.createIcons()); });
+      return { services, groupedServices, showModal, modalMode, form, loading, openModal, closeModal:()=>showModal.value=false, saveService, deleteService, toggleStatus, formatDuration: (m) => m >= 60 ? `${Math.floor(m/60)}h ${m%60 > 0 ? m%60+'m' : ''}` : `${m}min`, formatCategory: (c) => ({ 'Externo': 'Atendimento Externo', 'Residencia': 'Residência Tia Mel', 'Pacotes': 'Pacotes Mensais', 'Geral': 'Outros' }[c] || c), formatMoney };
+    }
+  };
+
+  const ViewFinanceiro = {
+    template: '#view-financeiro',
+    setup() {
+      const showToast = inject('showToast');
+      const list = ref([]);
+      const loading = ref(false);
+      const currentDate = ref(new Date());
+      const showModal = ref(false);
+      const form = reactive({ uuid: null, tipo: 'Entrada', categoria: 'Serviços', descricao: '', valor: '', data_pagamento: '' });
+      const fetchData = () => { loading.value = true; google.script.run.withSuccessHandler(data => { list.value = data; loading.value = false; nextTick(() => lucide.createIcons()); }).getFinanceiro(); };
+      const changeMonth = (delta) => { const d = new Date(currentDate.value); d.setMonth(d.getMonth() + delta); currentDate.value = d; nextTick(() => lucide.createIcons()); };
+      const currentMonthLabel = computed(() => currentDate.value.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }));
+      const filteredList = computed(() => { const m = currentDate.value.getMonth(), y = currentDate.value.getFullYear(); return list.value.filter(item => { const [iy, im, id] = item.data_pagamento.split('-').map(Number); return (im - 1) === m && iy === y; }); });
+      const totalSaldo = computed(() => list.value.reduce((acc, cur) => cur.tipo === 'Entrada' ? acc + Number(cur.valor) : acc - Number(cur.valor), 0));
+      const monthlyStats = computed(() => filteredList.value.reduce((acc, cur) => { if(cur.tipo === 'Entrada') acc.entradas += Number(cur.valor); else acc.saidas += Number(cur.valor); return acc; }, { entradas: 0, saidas: 0 }));
+      const openModal = (tipo) => { Object.assign(form, { uuid: null, tipo, categoria: tipo === 'Entrada' ? 'Serviços' : 'Outros', descricao: '', valor: '', data_pagamento: new Date().toISOString().split('T')[0] }); showModal.value = true; nextTick(() => lucide.createIcons()); };
+      const saveMovimentacao = () => { if(!form.valor || !form.descricao) return showToast('Preencha os campos', 'error'); showModal.value = false; showToast('Salvando...', 'info'); google.script.run.withSuccessHandler(() => { fetchData(); showToast('Salvo!'); }).saveMovimentacao(JSON.parse(JSON.stringify(form))); };
+      const deleteItem = (id) => { if(confirm('Apagar?')) { list.value = list.value.filter(i => i.uuid !== id); google.script.run.withSuccessHandler(() => fetchData()).deleteMovimentacao(id); } };
+      onMounted(() => { fetchData(); nextTick(() => lucide.createIcons()); });
+      onUpdated(() => { nextTick(() => lucide.createIcons()); });
+      return { list, filteredList, loading, showModal, form, currentDate, currentMonthLabel, totalSaldo, monthlyStats, changeMonth, openModal, closeModal:()=>showModal.value=false, saveMovimentacao, deleteItem, formatMoney, formatDate: formatDateGeneric };
+    }
+  };
+
+  const ViewHome = {
+    template: '#view-home',
+    components: { DashboardCard },
+    emits: ['navigate'],
+    setup(props, { emit }) {
+      const metrics = ref({ agendamentos_hoje: 0, pendentes_aprovacao: 0, receitas_mes: 0, despesas_mes: 0, receitas_semana: 0, despesas_semana: 0, saldo_atual: 0 });
+      const loading = ref(false);
+      const fetchMetrics = () => { loading.value = true; google.script.run.withSuccessHandler(m => { if(m.success) metrics.value = m.metrics; loading.value = false; nextTick(() => lucide.createIcons()); }).getDashboardMetrics(); };
+      const navigateTo = (p) => emit('navigate', p);
+      onMounted(() => { fetchMetrics(); nextTick(() => lucide.createIcons()); });
+      onUpdated(() => { nextTick(() => lucide.createIcons()); });
+      return { metrics, fetchMetrics, formatMoney, loading, navigateTo };
+    }
+  };
+
+  const ViewMenu = { 
+    template: '#view-menu', 
+    props: ['items'], 
+    emits: ['navigate'], 
+    setup(props, {emit}) { 
+       onMounted(() => nextTick(() => lucide.createIcons()));
+       onUpdated(() => nextTick(() => lucide.createIcons()));
+       return { goTo: (id) => emit('navigate', id) } 
+    } 
+  };
+
+  createApp({
+    components: { ViewMenu, ViewHome, ViewAgenda, ViewServices, ViewFinanceiro, ToastContainer },
+    setup() {
+      const { toasts, addToast, removeToast } = useToast(); provide('showToast', addToast);
+      const appState = ref('loading'); const currentView = ref('menu'); const mobileMenuOpen = ref(false); const setupLoading = ref(false);
+      const menuItems = [ { id: 'home', label: 'Dashboard', icon: 'layout-dashboard' }, { id: 'agenda', label: 'Agenda', icon: 'calendar' }, { id: 'financeiro', label: 'Caixa', icon: 'wallet' }, { id: 'servicos', label: 'Serviços', icon: 'list' } ];
+      const currentViewLabel = computed(() => menuItems.find(i => i.id === currentView.value)?.label || 'Menu');
+      const currentViewComponent = computed(() => { const map = { 'menu': 'ViewMenu', 'home': 'ViewHome', 'agenda': 'ViewAgenda', 'financeiro': 'ViewFinanceiro', 'servicos': 'ViewServices' }; return map[currentView.value] || 'ViewMenu'; });
+      const navigate = (id) => { currentView.value = id; mobileMenuOpen.value = false; nextTick(() => lucide.createIcons()); };
+      onMounted(() => { google.script.run.withSuccessHandler(s => { appState.value = s.isReady ? 'dashboard' : 'setup'; }).checkSystemStatus(); nextTick(() => lucide.createIcons()); });
+      onUpdated(() => nextTick(() => lucide.createIcons()));
+      const runSetup = () => { setupLoading.value = true; google.script.run.withSuccessHandler(r => { if(r.success) { setTimeout(() => appState.value = 'dashboard', 1000); addToast('Sistema instalado com sucesso!'); } setupLoading.value = false; }).setupFullDatabase(); };
+      return { appState, currentView, currentViewLabel, currentViewComponent, mobileMenuOpen, menuItems, navigate, setupLoading, runSetup, toasts, showSidebar: computed(() => currentView.value !== 'menu') };
+    }
+  }).mount('#app');
+</script>
