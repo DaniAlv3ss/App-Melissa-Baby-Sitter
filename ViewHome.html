@@ -1,0 +1,56 @@
+<template id="view-home">
+  <div class="space-y-6 animate-fade-in pb-10">
+    <div class="flex justify-between items-center mb-2">
+      <h3 class="text-sm font-bold text-secondary uppercase tracking-wider">Visão Geral</h3>
+      <button @click="fetchMetrics" :disabled="loading" class="text-xs font-bold text-primary bg-white px-4 py-2 rounded-full shadow-sm flex items-center gap-2 border border-pink-50 hover:bg-pink-50 transition-all active:scale-95">
+        <i data-lucide="refresh-cw" :class="['w-3 h-3', loading ? 'animate-spin' : '']"></i> {{ loading ? 'Atualizando...' : 'Atualizar Dados' }}
+      </button>
+    </div>
+
+    <!-- Cards Principais -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <dashboard-card icon="calendar" title="Hoje" :value="metrics.agendamentos_hoje" label="Agendamentos" color="primary"></dashboard-card>
+      <dashboard-card icon="clock" title="Pendentes" :value="metrics.pendentes_aprovacao" label="Para Aprovar" color="secondary" :pulse="metrics.pendentes_aprovacao > 0"></dashboard-card>
+      <dashboard-card icon="wallet" title="Saldo Atual" :value="formatMoney(metrics.saldo_atual)" label="Em Caixa" :color="metrics.saldo_atual >= 0 ? 'green' : 'red'"></dashboard-card>
+      <dashboard-card icon="bar-chart-3" title="Receita (Mês)" :value="formatMoney(metrics.receitas_mes)" label="Total Entrada" color="green"></dashboard-card>
+    </div>
+
+    <!-- Cards Semanais -->
+    <div class="mt-6">
+      <h3 class="text-sm font-bold text-secondary uppercase tracking-wider mb-3">Esta Semana</h3>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div class="bg-white p-4 rounded-xl shadow-sm border border-l-4 border-l-green-500 flex justify-between items-center transition-all hover:shadow-md hover:-translate-y-1">
+           <div><p class="text-xs text-gray-500 font-bold mb-1">Ganhos da Semana</p><h4 class="text-xl font-bold text-green-700">{{ formatMoney(metrics.receitas_semana) }}</h4></div>
+           <div class="bg-green-50 p-2 rounded-lg text-green-600"><i data-lucide="trending-up" class="w-6 h-6"></i></div>
+        </div>
+        <div class="bg-white p-4 rounded-xl shadow-sm border border-l-4 border-l-red-500 flex justify-between items-center transition-all hover:shadow-md hover:-translate-y-1">
+           <div><p class="text-xs text-gray-500 font-bold mb-1">Despesas da Semana</p><h4 class="text-xl font-bold text-red-700">{{ formatMoney(metrics.despesas_semana) }}</h4></div>
+           <div class="bg-red-50 p-2 rounded-lg text-red-600"><i data-lucide="trending-down" class="w-6 h-6"></i></div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Atalhos -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+       <div class="bg-surface p-6 rounded-2xl shadow-sm border border-white">
+          <h3 class="font-bold text-primary mb-4 flex items-center gap-2"><i data-lucide="zap" class="w-4 h-4 text-accent"></i> Acesso Rápido</h3>
+          <div class="flex flex-col gap-3">
+             <p class="text-xs text-secondary mb-1">O que deseja fazer agora?</p>
+             <button @click="navigateTo('agenda')" class="bg-bgApp hover:bg-pink-200 p-3 rounded-xl text-left transition-colors flex items-center gap-3 group">
+                <div class="bg-white p-2 rounded-lg text-accent group-hover:scale-110 transition-transform"><i data-lucide="plus" class="w-4 h-4"></i></div>
+                <span class="text-sm font-bold text-primary">Novo Agendamento</span>
+             </button>
+             <button @click="navigateTo('financeiro')" class="bg-bgApp hover:bg-pink-200 p-3 rounded-xl text-left transition-colors flex items-center gap-3 group">
+                <div class="bg-white p-2 rounded-lg text-accent group-hover:scale-110 transition-transform"><i data-lucide="dollar-sign" class="w-4 h-4"></i></div>
+                <span class="text-sm font-bold text-primary">Lançar Despesa/Receita</span>
+             </button>
+          </div>
+       </div>
+       <div class="bg-surface p-6 rounded-2xl shadow-sm border border-white flex flex-col justify-center items-center text-center">
+          <div class="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center mb-3"><i data-lucide="shield-check" class="w-6 h-6 text-blue-600"></i></div>
+          <h3 class="font-bold text-primary text-sm">Status do Sistema</h3>
+          <p class="text-xs text-secondary mt-1 max-w-[200px]">Banco de dados sincronizado e operante.</p>
+       </div>
+    </div>
+  </div>
+</template>
