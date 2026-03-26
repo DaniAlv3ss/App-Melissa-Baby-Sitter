@@ -1,0 +1,51 @@
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          primary: '#1B365D',    // Navy Blue
+          secondary: '#A66E4E',  // Teddy Brown
+          accent: '#E85D88',     // Hot Pink
+          surface: '#FDFBF7',    // Cream
+          bgApp: '#F2DBDD',      // Baby Pink
+          blocked: '#E5E7EB',    // Gray for blocked days
+        },
+        fontFamily: {
+          sans: ['Poppins', 'sans-serif'],
+        },
+        animation: {
+          'fade-in': 'fadeIn 0.4s ease-out',
+          'slide-up': 'slideUp 0.3s ease-out',
+        },
+        keyframes: {
+          fadeIn: { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
+          slideUp: { '0%': { transform: 'translateY(20px)', opacity: '0' }, '100%': { transform: 'translateY(0)', opacity: '1' } }
+        }
+      }
+    }
+  }
+</script>
+
+<style>
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #E85D88; border-radius: 3px; }
+  
+  /* Vue Transitions */
+  .fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
+  .fade-enter-from, .fade-leave-to { opacity: 0; }
+
+  .slide-enter-active, .slide-leave-active { transition: all 0.3s ease; }
+  .slide-enter-from, .slide-leave-to { transform: translateX(20px); opacity: 0; }
+
+  .modal-enter-active, .modal-leave-active { transition: all 0.3s ease; }
+  .modal-enter-from, .modal-leave-to { opacity: 0; transform: scale(0.95); }
+
+  /* Calendar Specifics */
+  .calendar-day { min-height: 5rem; transition: all 0.2s; }
+  .calendar-day:hover:not(.empty) { transform: translateY(-2px); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); z-index: 10; }
+  .blocked-pattern {
+    background-image: repeating-linear-gradient(45deg, #f3f4f6 0, #f3f4f6 10px, #e5e7eb 10px, #e5e7eb 20px);
+  }
+</style>
