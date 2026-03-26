@@ -1,8 +1,10 @@
 /**
  * ============================================================================
- * PROJETO: TIA MEL - GESTÃO (REBUILD)
+ * PROJETO: TIA MEL - GESTÃO
  * DATA: 16/02/2026
- * DESCRIÇÃO: Backend com mapeamento estrito de colunas.
+ * DESCRIÇÃO: Backend com lógica de Capacidade (Max 4 Baseado em QTD_CRIANCAS),
+ * Conflitos Externo/Fixo, Salvamento Otimizado em Lote (Batch Insert) e
+ * Auto-registro de Clientes.
  * ============================================================================
  */
 
@@ -10,12 +12,12 @@ const APP_CONFIG = {
   dbName: "Tia Mel DB",
   sheets: {
     servicos: "Servicos",
-    agendamentos: "agendamentos", // Nome exato da aba
-    financeiro: "Financeiro"
+    agendamentos: "agendamentos", 
+    financeiro: "Financeiro",
+    clientes: "clientes" // Adicionado mapeamento da aba de clientes
   }
 };
 
-// --- CONFIGURAÇÃO DE COLUNAS (ORDEM RIGIDA DA PLANILHA) ---
 const COLS_AGENDAMENTO = [
   'uuid', 'data_criacao', 'nome_cliente', 'celular_clean', 'celular_display', 
   'servico_nome', 'data_agendada', 'horario_inicio', 'horario_fim', 
@@ -25,7 +27,9 @@ const COLS_AGENDAMENTO = [
 const COLS_SERVICO = ['id', 'nome', 'duracao_minutos', 'preco', 'descricao', 'ativo', 'categoria'];
 const COLS_FINANCEIRO = ['uuid', 'created_at', 'data_pagamento', 'tipo', 'categoria', 'descricao', 'valor', 'metodo'];
 
-// --- SERVIÇO HTML ---
+// Nova estrutura de colunas mapeando o arquivo CSV enviado
+const COLS_CLIENTE = ['celular_clean', 'nome', 'data_primeiro_agendamento', 'total_gasto'];
+
 function doGet(e) {
   return HtmlService.createTemplateFromFile('Index')
     .evaluate()
@@ -34,11 +38,8 @@ function doGet(e) {
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
-function include(filename) {
-  return HtmlService.createHtmlOutputFromFile(filename).getContent();
-}
+function include(filename) { return HtmlService.createHtmlOutputFromFile(filename).getContent(); }
 
-// --- CONEXÃO COM BANCO ---
 function getDb() {
   const props = PropertiesService.getScriptProperties();
   const id = props.getProperty('DB_SPREADSHEET_ID');
@@ -46,10 +47,7 @@ function getDb() {
   return SpreadsheetApp.openById(id);
 }
 
-function checkSystemStatus() {
-  const props = PropertiesService.getScriptProperties();
-  return { isReady: !!props.getProperty('DB_SPREADSHEET_ID') };
-}
+function checkSystemStatus() { return { isReady: !!PropertiesService.getScriptProperties().getProperty('DB_SPREADSHEET_ID') }; }
 
 function setupFullDatabase() {
   try {
@@ -62,11 +60,10 @@ function setupFullDatabase() {
       ss = SpreadsheetApp.create(APP_CONFIG.dbName);
       props.setProperty('DB_SPREADSHEET_ID', ss.getId());
     }
-
     ensureSheet(ss, APP_CONFIG.sheets.servicos, COLS_SERVICO);
     ensureSheet(ss, APP_CONFIG.sheets.agendamentos, COLS_AGENDAMENTO);
     ensureSheet(ss, APP_CONFIG.sheets.financeiro, COLS_FINANCEIRO);
-
+    ensureSheet(ss, APP_CONFIG.sheets.clientes, COLS_CLIENTE); // Garante a criação da aba de clientes
     return { success: true };
   } catch (e) { return { success: false, error: e.message }; }
 }
@@ -81,13 +78,11 @@ function ensureSheet(ss, name, headers) {
   return sheet;
 }
 
-// --- LEITURA DE DADOS (READ) ---
 function getData(sheetName) {
   const ss = getDb();
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet || sheet.getLastRow() < 2) return [];
   
-  // Pega cabeçalhos reais da planilha para mapear
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => String(h).trim());
   const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
   
@@ -95,14 +90,9 @@ function getData(sheetName) {
     let obj = {};
     headers.forEach((h, i) => {
       let val = row[i];
-      // Converte datas para string ISO para não quebrar no frontend
       if (val instanceof Date) {
-        // Se parece hora (base 1899), formata HH:mm, senão yyyy-MM-dd
-        if (val.getFullYear() < 1900) {
-           val = Utilities.formatDate(val, Session.getScriptTimeZone(), "HH:mm");
-        } else {
-           val = Utilities.formatDate(val, Session.getScriptTimeZone(), "yyyy-MM-dd");
-        }
+        if (val.getFullYear() < 1900) val = Utilities.formatDate(val, Session.getScriptTimeZone(), "HH:mm");
+        else val = Utilities.formatDate(val, Session.getScriptTimeZone(), "yyyy-MM-dd");
       }
       obj[h] = val;
     });
@@ -110,46 +100,68 @@ function getData(sheetName) {
   });
 }
 
-// --- ESCRITA DE DADOS (CREATE/UPDATE) ---
 function saveDataStrict(sheetName, dataObj, idField, colDefinition) {
   const ss = getDb();
   const sheet = ss.getSheetByName(sheetName);
-  
-  // Garante ID
   if (!dataObj[idField]) dataObj[idField] = Utilities.getUuid();
   
-  // Cria array ordenado baseado na definição rígida das colunas
-  const rowData = colDefinition.map(col => {
-    let val = dataObj[col];
-    return val !== undefined && val !== null ? val : "";
-  });
-
+  const rowData = colDefinition.map(col => dataObj[col] !== undefined && dataObj[col] !== null ? dataObj[col] : "");
   const allIds = sheet.getRange(2, 1, sheet.getLastRow() > 1 ? sheet.getLastRow() - 1 : 1, 1).getValues().flat();
   const index = allIds.indexOf(dataObj[idField]);
 
-  if (index >= 0) {
-    // Update
-    sheet.getRange(index + 2, 1, 1, rowData.length).setValues([rowData]);
-  } else {
-    // Create
-    sheet.appendRow(rowData);
-  }
+  if (index >= 0) sheet.getRange(index + 2, 1, 1, rowData.length).setValues([rowData]);
+  else sheet.appendRow(rowData);
   
   return { success: true, id: dataObj[idField] };
 }
 
-// --- FUNÇÕES DE AGENDAMENTO ---
+function getAllAgendamentos() { return getData(APP_CONFIG.sheets.agendamentos); }
 
-function getAllAgendamentos() {
-  return getData(APP_CONFIG.sheets.agendamentos);
+// Extrai a quantidade do banco (Default = 1)
+function extractQtdCriancas(obs) {
+  let match = String(obs || "").match(/\[QTD:(\d+)\]/);
+  return match ? parseInt(match[1]) : 1;
+}
+
+// Helper para registrar clientes automaticamente
+function autoRegistrarCliente(nome, celular, dataAgendamento) {
+  if (!celular) return;
+  let celularLimpo = String(celular).replace(/\D/g, '');
+  if (!celularLimpo) return;
+  
+  try {
+    const ss = getDb();
+    const sheet = ss.getSheetByName(APP_CONFIG.sheets.clientes);
+    if (!sheet) return;
+    
+    const data = sheet.getDataRange().getValues();
+    let existe = false;
+    
+    // Verifica se o celular já está na coluna A (celular_clean)
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === celularLimpo) {
+         existe = true;
+         break;
+      }
+    }
+    
+    if (!existe) {
+      sheet.appendRow([celularLimpo, nome, dataAgendamento, 0]);
+    }
+  } catch (e) {
+    // Falhas no auto-registro não devem travar o agendamento
+    console.error("Erro ao registrar cliente: " + e.message);
+  }
 }
 
 function saveAgendamento(form) {
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
+    const ss = getDb();
+    const sheet = ss.getSheetByName(APP_CONFIG.sheets.agendamentos);
     
-    // Cálculo de Fim
+    // Tempo
     const [h, m] = String(form.horario_inicio).split(':').map(Number);
     const duracao = parseInt(form.duracao_min) || 60;
     const inicioMin = h * 60 + m;
@@ -160,61 +172,169 @@ function saveAgendamento(form) {
     if (fimH >= 24) fimH = fimH % 24; 
     const fimFormatado = `${String(fimH).padStart(2,'0')}:${String(fimM).padStart(2,'0')}`;
 
-    // Objeto para salvar (usando nomes exatos das colunas)
-    const payload = {
-      uuid: form.uuid,
-      data_criacao: form.data_criacao || new Date(),
-      nome_cliente: form.nome_cliente,
-      celular_clean: String(form.celular_display).replace(/\D/g, ''),
-      celular_display: form.celular_display,
-      servico_nome: form.servico_nome,
-      data_agendada: form.data_agendada,
-      horario_inicio: form.horario_inicio,
-      horario_fim: fimFormatado,
-      duracao_min: duracao,
-      valor_cobrado: form.valor_cobrado, // O frontend deve mandar o valor limpo ou formatado
-      status: form.status,
-      obs_cliente: "",
-      obs_admin: form.obs_admin
-    };
+    const existingAll = getAllAgendamentos();
+    let isNovoExterno = String(form.servico_nome).toLowerCase().includes('externo');
+    let qtdCriancasSolicitada = parseInt(form.qtd_criancas) || 1;
 
-    // Validação de Choque (Ignora se for edição do mesmo ID)
-    const existing = getAllAgendamentos();
-    const conflito = existing.some(a => {
-      if (a.uuid === payload.uuid) return false;
-      if (['Cancelado', 'Recusado'].includes(a.status)) return false;
-      if (a.data_agendada !== payload.data_agendada) return false;
-      
-      const [ah, am] = String(a.horario_inicio).split(':').map(Number);
-      const [afh, afm] = String(a.horario_fim).split(':').map(Number);
-      const aStart = ah * 60 + am;
-      const aEnd = afh * 60 + afm;
-      
-      return (inicioMin < aEnd && fimMin > aStart);
-    });
+    // LÓGICA: CRIAÇÃO DE MÚLTIPLOS FIXOS (Batch)
+    if (form.is_fixed_batch) {
+       
+       let [y, baseM, d] = form.data_inicio.split('-').map(Number);
+       let currentDate = new Date(y, baseM - 1, d);
+       
+       let endDate;
+       if (form.indeterminado) {
+           endDate = new Date(currentDate);
+           endDate.setMonth(endDate.getMonth() + 6); // Limite de 6 meses no app script pra n travar
+       } else {
+           let [ey, em, ed] = form.data_fim.split('-').map(Number);
+           endDate = new Date(ey, em - 1, ed);
+       }
+       
+       let diasEscolhidos = form.dias_semana.map(Number); // array ex: [1, 3, 5]
+       
+       let successCount = 0;
+       let conflictCount = 0;
+       let rowsToAppend = [];
 
-    if (conflito) return { success: false, error: "Horário ocupado!" };
+       // Remove lixo da observação original
+       let cleanObs = (form.obs || "").replace(/\[FIXO\]|\[QTD:\d+\]/g, '').trim();
+       let baseObsAdmin = `[FIXO][QTD:${qtdCriancasSolicitada}] ${cleanObs}`.trim();
 
-    return saveDataStrict(APP_CONFIG.sheets.agendamentos, payload, 'uuid', COLS_AGENDAMENTO);
+       while(currentDate <= endDate) {
+           if (diasEscolhidos.includes(currentDate.getDay())) {
+               let dateStr = Utilities.formatDate(currentDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
+               
+               // Filtra o dia
+               let conflitosDia = existingAll.filter(a => {
+                  if (['Cancelado', 'Recusado'].includes(a.status)) return false;
+                  if (a.data_agendada !== dateStr) return false;
+                  const aStart = Number(a.horario_inicio.split(':')[0]) * 60 + Number(a.horario_inicio.split(':')[1]);
+                  const aEnd = Number(a.horario_fim.split(':')[0]) * 60 + Number(a.horario_fim.split(':')[1]);
+                  return (inicioMin < aEnd && fimMin > aStart);
+               });
+               
+               let isBlockedFull = conflitosDia.some(c => c.status === 'Bloqueado');
+               let hasExterno = conflitosDia.some(c => String(c.servico_nome).toLowerCase().includes('externo'));
+               
+               // Total de crianças atual naquele horário
+               let totalCriancasAtuais = conflitosDia.reduce((sum, c) => sum + extractQtdCriancas(c.obs_admin), 0);
+               
+               // Bloqueios
+               let erroChoque = false;
+               if (isBlockedFull || (totalCriancasAtuais + qtdCriancasSolicitada > 4) || hasExterno) {
+                   erroChoque = true;
+               }
+               
+               if(!erroChoque) {
+                   const payload = {
+                      uuid: Utilities.getUuid(),
+                      data_criacao: form.data_criacao || new Date(),
+                      nome_cliente: form.nome_cliente,
+                      celular_clean: String(form.celular || '').replace(/\D/g, ''),
+                      celular_display: form.celular || '',
+                      servico_nome: form.servico_nome,
+                      data_agendada: dateStr,
+                      horario_inicio: form.horario_inicio,
+                      horario_fim: fimFormatado,
+                      duracao_min: duracao,
+                      valor_cobrado: form.valor_cobrado,
+                      status: form.status,
+                      obs_cliente: "",
+                      obs_admin: baseObsAdmin
+                   };
+                   
+                   let rowArr = COLS_AGENDAMENTO.map(col => payload[col] !== undefined ? payload[col] : "");
+                   rowsToAppend.push(rowArr);
+                   existingAll.push(payload); // Simula salvamento pra n conflitar os proximos
+                   successCount++;
+               } else {
+                   conflictCount++;
+               }
+           }
+           currentDate.setDate(currentDate.getDate() + 1);
+       }
+       
+       if (rowsToAppend.length > 0) {
+           sheet.getRange(sheet.getLastRow() + 1, 1, rowsToAppend.length, rowsToAppend[0].length).setValues(rowsToAppend);
+       }
+       
+       // Tenta cadastrar o cliente na aba de Clientes (se não existir)
+       autoRegistrarCliente(form.nome_cliente, form.celular, form.data_inicio);
+       
+       const msg = conflictCount > 0 
+          ? `Sucesso: ${successCount} salvos. (Ignorou ${conflictCount} dias por falta de vagas/choque)` 
+          : `${successCount} agendamentos fixos criados!`;
+          
+       return { success: true, message: msg, error: conflictCount > 0 };
+       
+    } else {
+       // LÓGICA NORMAL (ÚNICO AGENDAMENTO / EDIÇÃO)
+       let conflitosDia = existingAll.filter(a => {
+          if (a.uuid === form.uuid) return false; // Ignora a si mesmo
+          if (['Cancelado', 'Recusado'].includes(a.status)) return false;
+          if (a.data_agendada !== form.data_agendada) return false;
+          const aStart = Number(a.horario_inicio.split(':')[0]) * 60 + Number(a.horario_inicio.split(':')[1]);
+          const aEnd = Number(a.horario_fim.split(':')[0]) * 60 + Number(a.horario_fim.split(':')[1]);
+          return (inicioMin < aEnd && fimMin > aStart);
+       });
 
-  } catch (e) {
-    return { success: false, error: e.message };
-  } finally {
-    lock.releaseLock();
-  }
+       let isBlockedFull = conflitosDia.some(c => c.status === 'Bloqueado');
+       let hasExterno = conflitosDia.some(c => String(c.servico_nome).toLowerCase().includes('externo'));
+       let hasFixoResidencia = conflitosDia.some(c => c.obs_admin && String(c.obs_admin).includes('[FIXO]'));
+       
+       let totalCriancasAtuais = conflitosDia.reduce((sum, c) => sum + extractQtdCriancas(c.obs_admin), 0);
+       
+       if (isBlockedFull) return { success: false, error: "Horário bloqueado manualmente." };
+       if (totalCriancasAtuais + qtdCriancasSolicitada > 4) return { success: false, error: `Não há vagas suficientes. Temos ${4 - totalCriancasAtuais} vaga(s) disponível(is) neste horário.` };
+       if (isNovoExterno && hasFixoResidencia) return { success: false, error: "Conflito: Já existe atendimento Fixo/Residência no horário." };
+       if (!isNovoExterno && hasExterno) return { success: false, error: "Conflito: Você possui um atendimento Externo neste horário." };
+
+       // Gravação de TAG e QTD na observação, caso seja edição mantemos se era fixo
+       let cleanObs = (form.obs || "").replace(/\[FIXO\]|\[QTD:\d+\]/g, '').trim();
+       let isFixo = (form.obs || "").includes('[FIXO]'); // Para não perder a tag na edição de um dia individual
+       let tagAdmin = (isFixo ? "[FIXO]" : "") + `[QTD:${qtdCriancasSolicitada}]`;
+       
+       const payload = {
+          uuid: form.uuid,
+          data_criacao: form.data_criacao || new Date(),
+          nome_cliente: form.nome_cliente,
+          celular_clean: String(form.celular || '').replace(/\D/g, ''),
+          celular_display: form.celular || '',
+          servico_nome: form.servico_nome,
+          data_agendada: form.data_agendada,
+          horario_inicio: form.horario_inicio,
+          horario_fim: fimFormatado,
+          duracao_min: duracao,
+          valor_cobrado: form.valor_cobrado,
+          status: form.status,
+          obs_cliente: "",
+          obs_admin: `${tagAdmin} ${cleanObs}`.trim()
+       };
+
+       // Tenta cadastrar o cliente na aba de Clientes (se não existir)
+       autoRegistrarCliente(form.nome_cliente, form.celular, form.data_agendada);
+
+       return saveDataStrict(APP_CONFIG.sheets.agendamentos, payload, 'uuid', COLS_AGENDAMENTO);
+    }
+  } catch (e) { return { success: false, error: e.message };
+  } finally { lock.releaseLock(); }
 }
 
 function saveBlockRange(form) {
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
+    const ss = getDb();
+    const sheet = ss.getSheetByName(APP_CONFIG.sheets.agendamentos);
     
-    // Parse datas
     const [y1, m1, d1] = form.data_inicio.split('-').map(Number);
     const [y2, m2, d2] = form.data_fim.split('-').map(Number);
     const start = new Date(y1, m1-1, d1);
     const end = new Date(y2, m2-1, d2);
     
+    let rowsToAppend = [];
+
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
       const dateStr = Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM-dd");
       
@@ -247,28 +367,30 @@ function saveBlockRange(form) {
         obs_admin: "Bloqueio via Painel"
       };
       
-      saveDataStrict(APP_CONFIG.sheets.agendamentos, payload, 'uuid', COLS_AGENDAMENTO);
+      let rowArr = COLS_AGENDAMENTO.map(col => payload[col] !== undefined ? payload[col] : "");
+      rowsToAppend.push(rowArr);
+    }
+    
+    if (rowsToAppend.length > 0) {
+      sheet.getRange(sheet.getLastRow() + 1, 1, rowsToAppend.length, rowsToAppend[0].length).setValues(rowsToAppend);
     }
     return { success: true };
-  } catch (e) {
-    return { success: false, error: e.message };
-  } finally {
-    lock.releaseLock();
-  }
+  } catch (e) { return { success: false, error: e.message };
+  } finally { lock.releaseLock(); }
 }
 
-function deleteAgendamento(id) {
-  return deleteDataGeneric(APP_CONFIG.sheets.agendamentos, id);
-}
-
-// --- SERVICOS E FINANCEIRO (Mantidos com estrutura strict) ---
+function deleteAgendamento(id) { return deleteDataGeneric(APP_CONFIG.sheets.agendamentos, id); }
 function saveServico(data) { return saveDataStrict(APP_CONFIG.sheets.servicos, data, 'id', COLS_SERVICO); }
 function getServicosAdmin() { return getData(APP_CONFIG.sheets.servicos); }
 function deleteServico(id) { return deleteDataGeneric(APP_CONFIG.sheets.servicos, id); }
-
 function getFinanceiro() { return getData(APP_CONFIG.sheets.financeiro); }
 function saveMovimentacao(data) { return saveDataStrict(APP_CONFIG.sheets.financeiro, data, 'uuid', COLS_FINANCEIRO); }
 function deleteMovimentacao(id) { return deleteDataGeneric(APP_CONFIG.sheets.financeiro, id); }
+
+// --- FUNÇÕES CRUD PARA CLIENTES (Para serem usadas futuramente no Mini CRM) ---
+function getClientes() { return getData(APP_CONFIG.sheets.clientes); }
+function saveCliente(data) { return saveDataStrict(APP_CONFIG.sheets.clientes, data, 'celular_clean', COLS_CLIENTE); }
+function deleteCliente(id) { return deleteDataGeneric(APP_CONFIG.sheets.clientes, id); }
 
 function deleteDataGeneric(sheetName, id) {
   const ss = getDb();
